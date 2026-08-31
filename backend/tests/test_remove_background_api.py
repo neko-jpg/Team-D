@@ -7,6 +7,7 @@ provider failure, or incomplete mask into a successful preview response.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ from io import BytesIO
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageOps
 
 from backend.app import create_app
 from backend.providers.garment_masker import (
@@ -54,8 +55,55 @@ def mask_png(
     output = BytesIO()
     image = Image.new("L", size, fill)
     if add_foreground:
-        image.putpixel((size[0] // 2, size[1] // 2), 255)
+        left = max(0, size[0] // 4)
+        top = max(0, size[1] // 4)
+        right = min(size[0], max(left + 2, (size[0] * 3) // 4))
+        bottom = min(size[1], max(top + 2, (size[1] * 3) // 4))
+        image.paste(255, (left, top, right, bottom))
     image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def custom_mask_png(
+    *,
+    size: tuple[int, int] = FRONT_SIZE,
+    pixels: Mapping[tuple[int, int], int],
+) -> bytes:
+    output = BytesIO()
+    image = Image.new("L", size, 0)
+    for point, alpha in pixels.items():
+        image.putpixel(point, alpha)
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def exif_oriented_pattern_png() -> bytes:
+    image = Image.new("RGB", (6, 4))
+    for y in range(image.height):
+        for x in range(image.width):
+            image.putpixel(
+                (x, y),
+                (20 + x * 30, 15 + y * 45, 10 + (x + y) * 20),
+            )
+    exif = Image.Exif()
+    exif[274] = 6
+    output = BytesIO()
+    image.save(output, format="PNG", exif=exif)
+    return output.getvalue()
+
+
+def exif_oriented_pattern_jpeg() -> bytes:
+    image = Image.new("RGB", (6, 4), (42, 96, 168))
+    exif = Image.Exif()
+    exif[274] = 6
+    output = BytesIO()
+    image.save(
+        output,
+        format="JPEG",
+        exif=exif,
+        quality=100,
+        subsampling=0,
+    )
     return output.getvalue()
 
 
@@ -240,6 +288,129 @@ def test_valid_mask_png_is_returned_and_front_original_is_forwarded_exactly(
             "timeout": REMBG_TIMEOUT_SECONDS,
         }
     ]
+
+
+def test_exif_oriented_dimensions_are_used_without_mutating_original_bytes(
+    client: TestClient,
+) -> None:
+    front = exif_oriented_pattern_jpeg()
+    before_hash = hashlib.sha256(front).hexdigest()
+    mask = mask_png(size=(4, 6), add_foreground=True)
+    http_client = RequestSpyClient(FakeResponse(mask))
+    install_masker(client, GarmentMasker(http_client))
+
+    response = client.post(
+        "/api/remove-background",
+        files={"file": ("front.jpg", front, "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+    assert response.content == mask
+    assert hashlib.sha256(front).hexdigest() == before_hash
+    with Image.open(BytesIO(response.content)) as decoded_mask:
+        assert decoded_mask.size == (4, 6)
+    assert http_client.calls[0]["files"] == {
+        "file": ("front", front, "image/jpeg")
+    }
+
+
+def test_preview_returns_oriented_rgba_with_original_rgb_and_mask_alpha(
+    client: TestClient,
+) -> None:
+    front = exif_oriented_pattern_png()
+    before_hash = hashlib.sha256(front).hexdigest()
+    mask = mask_png(size=(4, 6), add_foreground=True)
+    http_client = RequestSpyClient(FakeResponse(mask))
+    install_masker(client, GarmentMasker(http_client))
+
+    response = client.post(
+        "/api/remove-background-preview",
+        files={"file": ("front.png", front, "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert hashlib.sha256(front).hexdigest() == before_hash
+    assert http_client.calls[0]["files"] == {
+        "file": ("front", front, "image/png")
+    }
+
+    with Image.open(BytesIO(front)) as decoded_front:
+        oriented_rgb = ImageOps.exif_transpose(decoded_front).convert("RGB")
+    with Image.open(BytesIO(mask)) as decoded_mask:
+        expected_alpha = decoded_mask.convert("L")
+    with Image.open(BytesIO(response.content)) as preview:
+        preview.load()
+        assert preview.format == "PNG"
+        assert preview.mode == "RGBA"
+        assert preview.size == oriented_rgb.size == expected_alpha.size == (4, 6)
+        assert preview.convert("RGB").tobytes() == oriented_rgb.tobytes()
+        alpha = preview.getchannel("A")
+        assert alpha.tobytes() == expected_alpha.tobytes()
+        assert alpha.getextrema() == (0, 255)
+
+    oriented_rgb.close()
+    expected_alpha.close()
+
+
+@pytest.mark.parametrize(
+    "invalid_mask",
+    [
+        pytest.param(
+            custom_mask_png(pixels={(FRONT_SIZE[0] // 2, FRONT_SIZE[1] // 2): 255}),
+            id="one-pixel",
+        ),
+        pytest.param(
+            custom_mask_png(
+                pixels={(FRONT_SIZE[0] // 2, y): 255 for y in range(FRONT_SIZE[1])}
+            ),
+            id="one-pixel-wide-line",
+        ),
+        pytest.param(
+            custom_mask_png(
+                pixels={(x, y): 64 for x in range(2, 5) for y in range(1, 4)}
+            ),
+            id="faint-foreground",
+        ),
+        pytest.param(
+            custom_mask_png(
+                pixels={(x, y): 254 for x in range(2, 5) for y in range(1, 4)}
+            ),
+            id="no-fully-opaque-pixel",
+        ),
+    ],
+)
+def test_effectively_invisible_masks_are_rejected(
+    client: TestClient,
+    invalid_mask: bytes,
+) -> None:
+    http_client = RequestSpyClient(FakeResponse(invalid_mask))
+    install_masker(client, GarmentMasker(http_client))
+
+    response = client.post("/api/remove-background", files=multipart())
+
+    assert_finite_error(response, status_code=502, code="INVALID_RESPONSE")
+    assert len(http_client.calls) == 1
+
+
+def test_small_but_visible_foreground_is_not_rejected(client: TestClient) -> None:
+    image_size = (200, 200)
+    small_mask = custom_mask_png(
+        size=image_size,
+        pixels={(x, y): 255 for x in range(90, 95) for y in range(90, 95)},
+    )
+    http_client = RequestSpyClient(FakeResponse(small_mask))
+    install_masker(client, GarmentMasker(http_client))
+
+    response = client.post(
+        "/api/remove-background",
+        files={"file": ("front.png", png_image(size=image_size), "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.content == small_mask
 
 
 def test_masker_can_use_an_alternate_loopback_port() -> None:

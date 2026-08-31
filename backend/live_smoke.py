@@ -43,7 +43,6 @@ from .providers.vision_guidance import (
     VisionDecision,
     validate_vision_decision,
 )
-from .providers.vision_guidance_responses import ResponsesVisionGuidanceAnalyzer
 from .settings import BackendSettings, ProviderMode
 
 
@@ -167,21 +166,10 @@ async def _run_livekit_guidance_smoke(
     if not os.environ.get("OPENAI_API_KEY", "").strip():
         raise LiveSmokeError("OpenAI is not configured for live guidance")
     try:
-        from openai import AsyncOpenAI
-
-        openai_client = AsyncOpenAI()
-        model = os.environ.get("VISION_GUIDANCE_MODEL", "").strip()
-        provider = create_vision_guidance_provider(
-            settings,
-            live_analyzer=ResponsesVisionGuidanceAnalyzer(
-                openai_client.responses,
-                model or "gpt-5.6-luna",
-            ),
-        )
+        provider = create_vision_guidance_provider(settings)
     except Exception as error:
         raise LiveSmokeError("Live vision guidance provider is unavailable") from error
     if not isinstance(provider, LiveVisionGuidanceProvider) or not provider.available:
-        await openai_client.close()
         raise LiveSmokeError("Live vision guidance provider is unavailable")
 
     room_name = f"listing-photo-backend-smoke-{uuid.uuid4().hex[:16]}"
@@ -204,6 +192,7 @@ async def _run_livekit_guidance_smoke(
     current_shot = [GuidanceShot.FRONT]
 
     try:
+        await provider.prewarm()
         await agent_room.connect(
             settings.livekit_url,
             agent_token,
@@ -291,7 +280,7 @@ async def _run_livekit_guidance_smoke(
             await publisher_room.disconnect()
         if agent_room.isconnected():
             await agent_room.disconnect()
-        await openai_client.close()
+        await provider.aclose()
 
 
 def _api_failure_code(response: Any) -> str:

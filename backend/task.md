@@ -69,7 +69,7 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 5.6 【健太】fixture transportで正常、provider timeout、古いevent、shot変更、切断／再接続、再同期を順に発生させ、sequence、expiry、現在shot、provider呼び出しが不正に巻き戻らないバックエンド回帰テストを1コマンドで実行できるようにする。（元タスク: 3.16）
 
-- [x] 5.7 【健太】Agent意味判定の同時実行数1、待機queue最大1、観測から助言event生成までp95 2秒以内、未処理例外0件を計測する。目標外でもqueueを増やさず、最新frameだけを処理することを確認する。（元タスク: 3.17）
+- [x] 5.7 【健太】Agent意味判定の同時実行数1、待機queue最大1、prewarm済み実OpenAI Realtimeの成功20件以上・provider error 0件・観測から助言event生成までp95 1秒未満、未処理例外0件を計測する。目標外でもqueueを増やさず、最新frameだけを処理することを確認する。（元タスク: 3.17、9.10）
 
 - [x] 5.8 【ともちゃん】fixtureモードでAgent guidance経路と`analyze-shot`、`suggest-measurement-points`、`remove-background`、背景生成providerを順に通すバックエンドE2Eを2回連続で実行し、同じevent、response、error契約を得る。（元タスク: 8.1）
 
@@ -78,6 +78,32 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 - [x] 5.10 【ともちゃん】Agent停止、撮影後AI timeout、端点提案失敗、rembg timeout／無効mask、背景生成失敗をfixtureで発生させ、成功responseへ自動変換せず、有限なerrorと再試行可能性を返すバックエンド障害マトリクステストを追加する。（元タスク: 8.3）
 
 - [x] 5.11 【健太】Python backend／Agentのunit、contract、API、integration、backend E2EテストをcleanなPython環境で実行し、失敗0件、未処理例外0件を確認する。frontend build、browser console、Safari実機確認は含めない。（元タスク: 8.7）
+
+## 6. OpenAI Realtime 1秒経路
+
+- [x] 6.1 【ともちゃん】frameごとのResponses APIを廃止し、撮影セッション単位のOpenAI Realtime WebSocket、prewarm、`conversation: none`、最大辺256px JPEG、有限function schemaへ変更する。
+- [x] 6.2 【ともちゃん】timeout時はresponseだけをcancelしてwarm socketを維持し、切断時だけ再接続する。session closeでprovider clientを1回だけ解放する契約テストを通す。
+- [x] 6.3 【健太】`.env.local`の実`OPENAI_API_KEY`で20件を計測し、接続1回、provider error 0件、provider p95 528.842ms、`observedAt→backend publish` p95 529.307ms、backend publish p95 0.297msを確認する。
+
+## 7. 公開実画像による精度・透過検証
+
+- [x] 7.1 【ともちゃん】Open Images V7の公式bbox、human image label、instance segmentation、画像単位のライセンス情報から、衣類16件とGT maskを取得する再現可能なCLIを追加する。人物annotationを除外してもannotation非網羅による着用画像が残るため、raw画像のbbox由来labelをflat-lay、front／back、tag、または最終`READY`の正解として扱わない。
+- [x] 7.2 【ともちゃん】公式GT maskで衣類RGBだけを切り抜き、無地の512px canvasへ遠すぎ、近すぎ、中央ずれ、欠けの4状態を決定的に合成する。16 sourceのうちoccluded／truncated／group／depiction／inside flagがなく、元bboxが画像端に接しない5 sourceだけを採用し、5 source×4状態=20件について画像と同寸のGT mask、変形後の実bbox、元ライセンスをmanifestへ保持する。人手確認していない元画像から`READY`正解を作らない。
+- [x] 7.3 【健太】実OpenAI Realtimeへ上記の非READY 20件を同一sessionで投入し、モデルが返してはならない`HOLD_STEADY`／`AGENT_UNAVAILABLE`をtool schemaから除外する。曖昧時の`READY`を禁止し、front／back解析コピーだけへ固定のシアン枠と中心十字を重ねる。最終構成`gpt-realtime-mini`、256px、low detail、32 tokenでprovider error 0件、接続1回、誤`READY` 0件、禁止code 0件、provider p50 514.854ms／p95 706.506ms／max 794.119msを確認する。別の反復では外部API揺らぎによりprovider error 2件・p95 1.340秒となったため、成功時の1秒経路は確認済みだがインターネットを含む全反復での1秒保証とはしない。
+- [x] 7.4 【健太】production transportでは非READYを1回目から即時配信し、`READY`だけを同じshotの2回連続一致後に配信する。同一shot・同一codeの後続結果は助言を再送せず、現在code、固定message、更新済み`expiresAt`、`displayChanged=false`を持つheartbeatだけにする。最初のlossy助言が欠落しても次のheartbeatから表示を復元できる回帰テストを追加する。
+- [x] 7.5 【ともちゃん】実rembg `birefnet-general-lite`へclean sourceから作った20件を送り、provider error 0件、mean／minimum IoU 0.988096／0.964637、mean／minimum precision 0.991359／0.966008、mean／minimum recall 0.996700／0.990157を確認する。RGBA previewは20/20件で透明・不透明画素を含み、alphaがmaskと一致し、不透明商品画素の元RGBを保持する。ウォーム後の処理時間はp50 4.656秒／p95 4.756秒であり、ライブ助言の1秒経路とは分離した撮影後処理とする。評価器は16件未満、p50 IoU 0.85未満、または1件でもIoU／precision／recall 0.90未満なら失敗にする。
+- [x] 7.6 【健太】上位`gpt-realtime-2`は同じ80件でp95 2.310秒、provider error 39件となり1秒要件を満たさないため採用しない。複数fieldを一度に返す条件分解方式もp95 903.304ms、provider error 7件、誤`READY` 2件へ悪化したため採用せず、検証済みの有限code方式をproduction defaultとして維持する。
+
+OpenAI単独だった初回評価では、非READY構図4分類のexact一致は20件中5件（25%）、`MOVE_FARTHER`は0/5だった。この失敗を受け、構図をOpenAIの意味推論から分離して、prewarm済み`u2netp`のmask／bboxを決定論的に分類するハイブリッド方式へ変更した。公開画像の切り抜きには表裏・平置き・折れの正解がなく、`READY`正例も人手確認していないため、ハイブリッド後の20/20もプロダクト全体の助言精度または`READY`再現率とはみなさない。front／back／tagの撮影助言精度と撮影後受理精度を完了判定するには、実際の撮影手順で正解を付けた12〜30枚以上を別途用意する。RepViT-SAMもApple M3のCoreMLで20件を計測してp95 238.6msだったが、動的decoderのexport互換性とLinux portabilityを優先し、このbackendですでに運用するrembg／ONNXの`u2netp`を採用した。
+
+## 8. ローカル構図判定とRealtime意味判定のハイブリッド
+
+- [x] 8.1 【ともちゃん】最大連結成分のmask／bboxから画像端1px接触、span 0.42未満、span 0.77超、中心軸ずれ0.12超の優先順で4構図codeまたはPASSだけを返す`GeometryGuidanceProvider`を`backend/**`へ実装する。ローカル判定から`READY`を返さず、空／全面／寸法不一致maskを契約違反として拒否する。
+- [x] 8.2 【ともちゃん】既存rembg v2.0.81 sidecarのprewarm済み`u2netp`をライブ構図mask専用に接続し、model名固定、450ms以下timeout、PNG／寸法検証を行う。`front|back`だけで使用し、撮影後の`birefnet-general-lite`経路とtimeoutを分離する。
+- [x] 8.3 【ともちゃん】同じ最新frameからgeometryとOpenAI Realtime semanticを並列開始し、geometry補正を優先、PASS時だけsemanticを採用するhybrid analyzerを実装する。geometry失敗またはPASS時のsemantic失敗は成功結果へfallbackせず、既存transportで`AGENT_UNAVAILABLE`へ正規化する。tag／measurementは既存semantic経路を維持する。
+- [x] 8.4 【健太】20件の公開衣類構図fixtureを本番と同じrembg HTTPへ通し、各code 5/5、全体20/20、誤`READY` 0件、provider error 0件、ウォームp95 400ms未満をbackend-only gateで確認する。hybrid実credential反復ではgeometry／semantic／合成／publishを分離計測し、成功20件以上、error 0件、全体p95 1秒未満を確認する。
+
+構図ゲートは4反復すべて20/20、各code 5/5、誤`READY` 0件、provider error 0件で、ウォームp95は181.300〜241.293ms、最大値は369.766msだった。`.env.local`の実`OPENAI_API_KEY`と本番runtime factoryを使った20件のhybrid transport計測はprovider error 0件、`observedAt→provider完了` p95 633.596ms、backend publish p95 0.244ms、`observedAt→backend publish` p95 633.789msで合格した。別の構図補正20件はp95 199.913ms、意味判定が必要なPASS 20件はp95 522.873msで、1本のprewarm済みRealtime接続が再利用された。
 
 ## 完了条件
 

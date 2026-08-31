@@ -22,14 +22,16 @@ from typing import Protocol, TypeAlias, runtime_checkable
 from backend.guidance_state_machine import (
     GUIDANCE_MESSAGES,
     GuidanceEvent,
+    GuidanceHeartbeat,
     GuidanceStateEvent,
     GuidanceStateMachine,
 )
 from backend.providers.runtime import ProviderInference
 from backend.providers.vision_guidance import (
+    GuidanceCode,
     GuidanceShot,
     validate_guidance_shot,
-    validate_vision_decision,
+    validate_vision_decision_for_shot,
 )
 
 
@@ -45,7 +47,7 @@ class DataPublisher(Protocol):
         """Publish bytes, returning either a value or an awaitable value."""
 
 
-Event: TypeAlias = GuidanceEvent | GuidanceStateEvent
+Event: TypeAlias = GuidanceEvent | GuidanceStateEvent | GuidanceHeartbeat
 
 _GUIDANCE_FIELDS = frozenset(
     {
@@ -60,6 +62,20 @@ _GUIDANCE_FIELDS = frozenset(
     }
 )
 _STATE_FIELDS = frozenset({"type", "sessionId", "sequence", "shot", "code", "observedAt"})
+_HEARTBEAT_FIELDS = frozenset(
+    {
+        "type",
+        "sessionId",
+        "sequence",
+        "shot",
+        "code",
+        "message",
+        "observedAt",
+        "expiresAt",
+        "displayChanged",
+    }
+)
+_PROCESS_EPOCH_FIELD = frozenset({"processEpoch"})
 
 
 def _finite_json(value: object) -> bool:
@@ -95,8 +111,16 @@ def encode_guidance_event(event: Event) -> bytes:
     elif isinstance(event, GuidanceStateEvent):
         payload = event.to_payload()
         expected_fields = _STATE_FIELDS
+    elif isinstance(event, GuidanceHeartbeat):
+        payload = event.to_payload()
+        expected_fields = _HEARTBEAT_FIELDS
     else:
-        raise GuidanceTransportError("event must be a GuidanceEvent or GuidanceStateEvent")
+        raise GuidanceTransportError(
+            "event must be a GuidanceEvent, GuidanceStateEvent, or GuidanceHeartbeat"
+        )
+
+    if event.process_epoch is not None:
+        expected_fields |= _PROCESS_EPOCH_FIELD
 
     if set(payload) != expected_fields or not _finite_json(payload):
         raise GuidanceTransportError("event payload must have a finite closed shape")
@@ -128,6 +152,8 @@ class GuidanceTransportAdapter:
         *,
         session_id: str | None = None,
         state_machine: GuidanceStateMachine | None = None,
+        process_epoch: str | None = None,
+        provider_deadline_seconds: float | None = None,
     ) -> None:
         if not callable(inference):
             raise TypeError("inference must be callable")
@@ -137,19 +163,42 @@ class GuidanceTransportAdapter:
         if state_machine is None:
             if session_id is None:
                 raise TypeError("session_id is required when state_machine is not supplied")
-            state_machine = GuidanceStateMachine(session_id)
+            state_machine = GuidanceStateMachine(
+                session_id,
+                ready_confirmation_count=2,
+                process_epoch=process_epoch,
+            )
         elif session_id is not None and session_id != state_machine.session_id:
             raise GuidanceTransportError("session_id does not match state_machine")
+        elif process_epoch is not None and process_epoch != state_machine.process_epoch:
+            raise GuidanceTransportError("process_epoch does not match state_machine")
+
+        if provider_deadline_seconds is not None:
+            if (
+                isinstance(provider_deadline_seconds, bool)
+                or not isinstance(provider_deadline_seconds, (int, float))
+                or not isfinite(float(provider_deadline_seconds))
+                or float(provider_deadline_seconds) <= 0
+            ):
+                raise GuidanceTransportError(
+                    "provider_deadline_seconds must be a finite positive number"
+                )
 
         self._inference = inference
         self._publisher = publisher
         self._state_machine = state_machine
+        self._provider_deadline_seconds = (
+            None
+            if provider_deadline_seconds is None
+            else float(provider_deadline_seconds)
+        )
         self._shot: GuidanceShot | None = None
         self._connected = True
         self._closed = False
         self._connection_generation = 0
         self._shot_generation = 0
         self._frame_generation = 0
+        self._provider_closed = False
         # State allocation and publication are one serial critical section.
         # Inference deliberately happens outside this lock.
         self._lock = asyncio.Lock()
@@ -165,6 +214,10 @@ class GuidanceTransportAdapter:
     @property
     def sequence(self) -> int:
         return self._state_machine.sequence
+
+    @property
+    def process_epoch(self) -> str | None:
+        return self._state_machine.process_epoch
 
     @property
     def connected(self) -> bool:
@@ -246,6 +299,17 @@ class GuidanceTransportAdapter:
     # the finite ``resync`` state event today.
     snapshot = resync
 
+    async def heartbeat(
+        self, *, observed_at: object | None = None
+    ) -> GuidanceHeartbeat:
+        """Publish liveness without changing or redrawing display guidance."""
+
+        async with self._lock:
+            self._require_active()
+            return await self._publish(
+                self._state_machine.heartbeat(observed_at=observed_at)
+            )  # type: ignore[return-value]
+
     async def mark_disconnected(self) -> bool:
         """Fence the current connection and suppress all future publication.
 
@@ -305,6 +369,27 @@ class GuidanceTransportAdapter:
             self._frame_generation += 1
             return True
 
+    async def prewarm_provider(self) -> None:
+        """Prepare a session-owned provider before subscribing to camera frames."""
+
+        prewarm = getattr(self._inference, "prewarm", None)
+        if callable(prewarm):
+            result = prewarm()
+            if inspect.isawaitable(result):
+                await result
+
+    async def close_provider(self) -> None:
+        """Release the provider only after camera inference has been drained."""
+
+        if self._provider_closed:
+            return
+        close = getattr(self._inference, "aclose", None)
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        self._provider_closed = True
+
     async def process_frame(
         self,
         frame: object,
@@ -336,7 +421,30 @@ class GuidanceTransportAdapter:
             shot_generation = self._shot_generation
             frame_generation = self._frame_generation
 
-        raw_result = await self._inference(frame)
+        try:
+            if self._provider_deadline_seconds is None:
+                raw_result = await self._inference(frame)
+            else:
+                raw_result = await asyncio.wait_for(
+                    self._inference(frame),
+                    timeout=self._provider_deadline_seconds,
+                )
+            decision = validate_vision_decision_for_shot(raw_result, shot_value)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if self._provider_deadline_seconds is None:
+                # Preserve the original SDK-independent adapter behavior for
+                # existing callers. Production enables a finite deadline and
+                # therefore the normalized failure path below.
+                raise
+            decision = validate_vision_decision_for_shot(
+                {"code": GuidanceCode.AGENT_UNAVAILABLE, "confidence": 0.0},
+                shot_value,
+            )
+            # An unavailable state starts when the failure becomes known, not
+            # when the now-stale camera frame was originally observed.
+            observed_at = None
 
         # Re-enter the serial publication boundary only after inference.  A
         # later frame is also a newer observation, so an older completion is
@@ -351,13 +459,15 @@ class GuidanceTransportAdapter:
                 or shot_value != self._shot
             ):
                 return None
-            decision = validate_vision_decision(raw_result)
             event = self._state_machine.emit(
                 shot_value,
                 decision,
                 observed_at=observed_at,
             )
             if event is None:
+                await self._publish(
+                    self._state_machine.heartbeat(observed_at=observed_at)
+                )
                 return None
             return await self._publish(event)  # type: ignore[return-value]
 

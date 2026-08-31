@@ -46,6 +46,16 @@
 - **WHEN** maskが空、全面、元画像と寸法不一致、または処理不能である
 - **THEN** システムは合成画像を承認可能にせず、再試行または元画像採用を提示する
 
+#### Scenario: EXIF回転を持つ正面原本からmaskを作る
+
+- **WHEN** 正面原本がEXIF orientationによる90度回転を必要とする
+- **THEN** backendは原本bytesを変更せず、orientation適用後の解析寸法とmask寸法を比較して有効なmaskを返す
+
+#### Scenario: backendだけで透過結果を確認する
+
+- **WHEN** 利用者またはbackend検証が正面原本と有効maskから透過previewを要求する
+- **THEN** backendはorientation適用後の元画像RGBを保持し、maskをalphaへ適用した同寸法のRGBA PNGを返し、透明画素と不透明な商品画素の両方を含むことを検証する
+
 ### Requirement: 元画像と合成画像を比較して承認する
 
 システム SHALL、元画像と合成画像を同じ商品について比較できるUIを提供し、合成画像を初期状態で承認済みにしてはならない。利用者が合成画像または元画像を明示的に選択した場合だけ出品用正面画像を確定する。

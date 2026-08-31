@@ -27,12 +27,25 @@ $env:REMBG_HOME = $modelCache
 $rembgExecutable = Join-Path $venvDirectory 'Scripts\rembg.exe'
 & $rembgExecutable d birefnet-general-lite
 if ($LASTEXITCODE -ne 0) { throw "birefnet-general-liteのdownloadに失敗しました。" }
+& $rembgExecutable d u2netp
+if ($LASTEXITCODE -ne 0) { throw "u2netpのdownloadに失敗しました。" }
 
 $modelPath = Join-Path $modelCache 'models\birefnet-general-lite\birefnet-general-lite.onnx'
 if (-not (Test-Path -LiteralPath $modelPath)) {
     throw "モデルファイルが見つかりません: $modelPath"
 }
+$geometryModelPath = Join-Path $modelCache 'models\u2netp\u2netp.onnx'
+if (-not (Test-Path -LiteralPath $geometryModelPath)) {
+    throw "モデルファイルが見つかりません: $geometryModelPath"
+}
+$geometryModelSha256 = (Get-FileHash -LiteralPath $geometryModelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$expectedGeometryModelSha256 = '309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8'
+if ($geometryModelSha256 -ne $expectedGeometryModelSha256) {
+    throw "u2netp SHA-256が一致しません: $geometryModelSha256"
+}
 
 Write-Output "Python=$pythonVersion"
 Write-Output "rembg=$(& $pythonExecutable -c 'import rembg; print(rembg.__version__)')"
 Write-Output "model=$modelPath"
+Write-Output "geometryModel=$geometryModelPath"
+Write-Output "geometryModelSha256=$geometryModelSha256"

@@ -57,7 +57,7 @@ def _png_image() -> bytes:
 def _mask_png() -> bytes:
     output = BytesIO()
     mask = Image.new("L", IMAGE_SIZE, 0)
-    mask.putpixel((IMAGE_SIZE[0] // 2, IMAGE_SIZE[1] // 2), 255)
+    mask.paste(255, (1, 1, 6, 4))
     mask.save(output, format="PNG")
     return output.getvalue()
 
@@ -154,7 +154,10 @@ async def _run_agent_guidance(image: bytes) -> dict[str, object]:
     runtime = await entrypoint(
         FixtureAgentContext(FixtureRoom(publisher)),
         inference=create_provider_inference(provider),
-        transport_factory=agent.build_transport_factory(provider),
+        transport_factory=agent.build_transport_factory(
+            provider,
+            process_epoch="backend-fixture-e2e-process",
+        ),
         observation_clock=lambda: 1_000,
     )
     processor = runtime.subscriber.processor
@@ -168,6 +171,16 @@ async def _run_agent_guidance(image: bytes) -> dict[str, object]:
             )
         )
         await asyncio.wait_for(processor.wait_idle(), timeout=1)
+        confirmed = processor.submit_nowait(
+            EncodedImage(
+                data=image,
+                mime_type="image/png",
+                width=IMAGE_SIZE[0],
+                height=IMAGE_SIZE[1],
+            )
+        )
+        await asyncio.wait_for(processor.wait_idle(), timeout=1)
+        assert confirmed
         before_close = {
             "accepted": accepted,
             "published": publisher.calls,
@@ -308,19 +321,36 @@ def test_fixture_backend_e2e_is_identical_across_two_consecutive_runs() -> None:
                 "shot": "front",
                 "code": None,
                 "observedAt": 1_000,
+                "processEpoch": "backend-fixture-e2e-process",
             },
             "reliable": True,
         },
         {
             "payload": {
+                "type": "heartbeat",
                 "sessionId": "backend-fixture-e2e",
                 "sequence": 2,
+                "shot": "front",
+                "code": None,
+                "message": None,
+                "observedAt": 1_000,
+                "expiresAt": None,
+                "displayChanged": False,
+                "processEpoch": "backend-fixture-e2e-process",
+            },
+            "reliable": False,
+        },
+        {
+            "payload": {
+                "sessionId": "backend-fixture-e2e",
+                "sequence": 3,
                 "shot": "front",
                 "code": "READY",
                 "message": "撮影できます。",
                 "confidence": 1.0,
                 "observedAt": 1_000,
                 "expiresAt": 3_000,
+                "processEpoch": "backend-fixture-e2e-process",
             },
             "reliable": False,
         },
@@ -328,7 +358,7 @@ def test_fixture_backend_e2e_is_identical_across_two_consecutive_runs() -> None:
     assert agent_result == {
         "accepted": True,
         "published": published,
-        "processedCount": 1,
+        "processedCount": 2,
         "errorCount": 0,
         "currentShot": "front",
         "closed": True,

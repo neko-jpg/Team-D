@@ -9,6 +9,7 @@ missing optional image runtime does not make importing :mod:`backend` fail.
 from __future__ import annotations
 
 import asyncio
+import math
 import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,6 +22,15 @@ REMBG_MODEL = "birefnet-general-lite"
 REMBG_TIMEOUT_SECONDS = 35.0
 MAX_GARMENT_IMAGE_PIXELS = 50_000_000
 MAX_GARMENT_MASK_BYTES = 10 * 1024 * 1024
+MASK_VISIBLE_ALPHA_THRESHOLD = 16
+MASK_OPAQUE_ALPHA_THRESHOLD = 255
+# These relative floors are deliberately far below a normally framed garment:
+# 0.05% visible area and 1% span on each axis still allow a very small subject,
+# while rejecting isolated pixels and decoder/model noise at phone resolution.
+MIN_GARMENT_MASK_VISIBLE_PIXELS = 4
+MIN_GARMENT_MASK_VISIBLE_RATIO = 0.0005
+MIN_GARMENT_MASK_BBOX_PIXELS = 2
+MIN_GARMENT_MASK_BBOX_RATIO = 0.01
 
 
 class GarmentMaskContractError(ValueError):
@@ -51,7 +61,7 @@ class GarmentMaskInput:
 
 @dataclass(frozen=True, slots=True)
 class GarmentMask:
-    """A verified PNG mask whose dimensions match its front original."""
+    """A verified PNG mask matching the EXIF-oriented front dimensions."""
 
     data: bytes
     width: int
@@ -125,7 +135,7 @@ class GarmentMasker:
             raise GarmentMaskContractError("front must be a GarmentMaskInput")
 
         original_width, original_height = await asyncio.to_thread(
-            _decode_image_size,
+            _decode_display_image_size,
             front.data,
             "front image",
         )
@@ -164,17 +174,11 @@ class GarmentMasker:
         if len(content) > MAX_GARMENT_MASK_BYTES:
             raise GarmentMaskContractError("rembg response exceeds the mask size limit")
 
-        mask_width, mask_height, extrema = await asyncio.to_thread(
-            _decode_png_mask,
+        mask_width, mask_height = await asyncio.to_thread(
+            validate_garment_mask_png,
             content,
             (original_width, original_height),
         )
-        if (mask_width, mask_height) != (original_width, original_height):
-            raise GarmentMaskContractError("rembg mask dimensions must match the front image")
-        if extrema[1] == 0:
-            raise GarmentMaskContractError("rembg returned an empty mask")
-        if extrema[0] > 0:
-            raise GarmentMaskContractError("rembg returned a full-image mask")
         return GarmentMask(data=content, width=mask_width, height=mask_height)
 
     async def remove_background(self, front: GarmentMaskInput) -> GarmentMask:
@@ -247,20 +251,22 @@ class HttpxGarmentMaskHttpClient:
             raise TimeoutError("rembg request timed out") from exc
 
 
-def _pillow_image() -> Any:
+def _pillow_modules() -> tuple[Any, Any]:
     """Load Pillow only when validation is actually attempted."""
 
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
     except ImportError as exc:
         raise GarmentMaskUnavailableError(
             "Pillow is required to validate front images and rembg masks"
         ) from exc
-    return Image
+    return Image, ImageOps
 
 
-def _decode_image_size(data: bytes, label: str) -> tuple[int, int]:
-    image_module = _pillow_image()
+def _decode_display_image_size(data: bytes, label: str) -> tuple[int, int]:
+    """Return the EXIF-oriented display dimensions without changing ``data``."""
+
+    image_module, image_ops = _pillow_modules()
     with warnings.catch_warnings():
         warnings.simplefilter("error", image_module.DecompressionBombWarning)
         try:
@@ -274,8 +280,17 @@ def _decode_image_size(data: bytes, label: str) -> tuple[int, int]:
                     )
                 image.verify()
             with image_module.open(BytesIO(data)) as image:
-                width, height = image.size
-                image.load()
+                oriented = image_ops.exif_transpose(image)
+                try:
+                    width, height = oriented.size
+                    if width * height > MAX_GARMENT_IMAGE_PIXELS:
+                        raise GarmentMaskContractError(
+                            f"{label} dimensions exceed the safe decode limit"
+                        )
+                    oriented.load()
+                finally:
+                    if oriented is not image:
+                        oriented.close()
         except GarmentMaskUnavailableError:
             raise
         except GarmentMaskContractError:
@@ -298,7 +313,7 @@ def _decode_png_mask(
     data: bytes,
     expected_size: tuple[int, int] | None = None,
 ) -> tuple[int, int, tuple[int, int]]:
-    image_module = _pillow_image()
+    image_module, _image_ops = _pillow_modules()
     with warnings.catch_warnings():
         warnings.simplefilter("error", image_module.DecompressionBombWarning)
         try:
@@ -323,6 +338,19 @@ def _decode_png_mask(
                 image.load()
                 width, height = image.size
                 extrema = image.getextrema()
+                histogram = image.histogram()
+                visible_pixels = sum(histogram[MASK_VISIBLE_ALPHA_THRESHOLD:])
+                opaque_pixels = sum(histogram[MASK_OPAQUE_ALPHA_THRESHOLD:])
+                visible = image.point(
+                    lambda alpha: 255
+                    if alpha >= MASK_VISIBLE_ALPHA_THRESHOLD
+                    else 0,
+                    mode="L",
+                )
+                try:
+                    foreground_bbox = visible.getbbox()
+                finally:
+                    visible.close()
         except GarmentMaskContractError:
             raise
         except GarmentMaskUnavailableError:
@@ -340,7 +368,75 @@ def _decode_png_mask(
             ) from exc
     if width <= 0 or height <= 0 or not isinstance(extrema, tuple) or len(extrema) != 2:
         raise GarmentMaskContractError("rembg response mask is invalid")
+    _validate_mask_sanity(
+        width=width,
+        height=height,
+        extrema=extrema,
+        visible_pixels=visible_pixels,
+        opaque_pixels=opaque_pixels,
+        foreground_bbox=foreground_bbox,
+    )
     return width, height, extrema
+
+
+def _validate_mask_sanity(
+    *,
+    width: int,
+    height: int,
+    extrema: tuple[int, int],
+    visible_pixels: int,
+    opaque_pixels: int,
+    foreground_bbox: tuple[int, int, int, int] | None,
+) -> None:
+    if extrema[1] == 0:
+        raise GarmentMaskContractError("rembg returned an empty mask")
+    if extrema[0] > 0:
+        raise GarmentMaskContractError("rembg returned a full-image mask")
+
+    pixel_count = width * height
+    minimum_visible_pixels = max(
+        MIN_GARMENT_MASK_VISIBLE_PIXELS,
+        math.ceil(pixel_count * MIN_GARMENT_MASK_VISIBLE_RATIO),
+    )
+    if visible_pixels < minimum_visible_pixels:
+        raise GarmentMaskContractError(
+            "rembg returned an effectively empty mask"
+        )
+
+    # A garment mask needs a small, fully opaque interior. This rejects a large
+    # field of barely visible alpha noise without requiring the garment to
+    # occupy a significant fraction of the frame.
+    minimum_opaque_pixels = max(1, math.ceil(minimum_visible_pixels * 0.1))
+    if opaque_pixels < minimum_opaque_pixels:
+        raise GarmentMaskContractError("rembg mask foreground is too faint")
+
+    if foreground_bbox is None:
+        raise GarmentMaskContractError(
+            "rembg returned an effectively empty mask"
+        )
+    left, top, right, bottom = foreground_bbox
+    minimum_bbox_width = max(
+        MIN_GARMENT_MASK_BBOX_PIXELS,
+        math.ceil(width * MIN_GARMENT_MASK_BBOX_RATIO),
+    )
+    minimum_bbox_height = max(
+        MIN_GARMENT_MASK_BBOX_PIXELS,
+        math.ceil(height * MIN_GARMENT_MASK_BBOX_RATIO),
+    )
+    if right - left < minimum_bbox_width or bottom - top < minimum_bbox_height:
+        raise GarmentMaskContractError(
+            "rembg mask foreground bounding box is too small"
+        )
+
+
+def validate_garment_mask_png(
+    data: bytes,
+    expected_size: tuple[int, int] | None = None,
+) -> tuple[int, int]:
+    """Validate one mask-only PNG and return its verified dimensions."""
+
+    width, height, _extrema = _decode_png_mask(data, expected_size)
+    return width, height
 
 
 def _content_type(headers: object) -> str | None:
@@ -368,8 +464,15 @@ __all__ = [
     "HttpxGarmentMaskHttpClient",
     "MAX_GARMENT_IMAGE_PIXELS",
     "MAX_GARMENT_MASK_BYTES",
+    "MASK_OPAQUE_ALPHA_THRESHOLD",
+    "MASK_VISIBLE_ALPHA_THRESHOLD",
+    "MIN_GARMENT_MASK_BBOX_PIXELS",
+    "MIN_GARMENT_MASK_BBOX_RATIO",
+    "MIN_GARMENT_MASK_VISIBLE_PIXELS",
+    "MIN_GARMENT_MASK_VISIBLE_RATIO",
     "REMBG_MODEL",
     "REMBG_REMOVE_URL",
     "REMBG_TIMEOUT_SECONDS",
     "RembgGarmentMasker",
+    "validate_garment_mask_png",
 ]

@@ -14,7 +14,7 @@ from .vision_guidance import (
     GuidanceInput,
     VisionDecision,
     validate_guidance_input,
-    validate_vision_decision,
+    validate_vision_decision_for_shot,
 )
 
 
@@ -110,7 +110,9 @@ class ResponsesVisionGuidanceAnalyzer:
         response = await self._client.create(
             **self.request_for(validated, self._model)
         )
-        return validate_vision_decision(_response_payload(response))
+        return validate_vision_decision_for_shot(
+            _response_payload(response), validated.requested_shot
+        )
 
 
 def _response_payload(response: object) -> object:

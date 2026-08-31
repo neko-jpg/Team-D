@@ -130,6 +130,67 @@ browserタブを閉じ、terminal Aで`Ctrl-C`、terminal Bで`Ctrl-C`を実行�
 lk room delete "$LIVEKIT_ROOM"
 ```
 
+## ライブAI助言の1秒ゲート（OpenSpec 9.6〜9.10）
+
+本番live guidanceは、frameごとにResponses APIへ接続せず、撮影セッション中に
+OpenAI Realtime WebSocketを1本だけ維持する。AgentはLiveKit camera trackを継続購読し、
+同時response 1件・待機frame 1件で最新frameだけを最大辺256pxのJPEGへ変換する。
+各判定は`conversation: none`で独立させ、強制function schemaから有限codeだけを受理する。
+
+`.env.local`へserver-only設定を置く。`OPENAI_API_KEY`を表示または`VITE_`変数へ複製しない。
+
+```dotenv
+OPENAI_API_KEY=...
+VISION_GUIDANCE_MODEL=gpt-realtime-mini
+VISION_GUIDANCE_RESPONSE_TIMEOUT_SECONDS=0.90
+VISION_GUIDANCE_IMAGE_MAX_EDGE=256
+VISION_GUIDANCE_JPEG_QUALITY=55
+VISION_GUIDANCE_MAX_OUTPUT_TOKENS=32
+```
+
+次の1コマンドは接続と画像経路をprewarmした後、同一WebSocketで20件を逐次判定する。
+cold-startは別に記録し、`observedAt→provider完了→backend publish`だけを1秒ゲートへ使う。
+
+```bash
+set -a
+source .env.local
+set +a
+uv run --frozen python -m backend.guidance_behavior_verification \
+  --mode live --live-samples 20 --pretty
+```
+
+合格条件は次のすべてである。1つでも満たさない場合は`PROVIDER_MODE=live`のデモ経路へ
+採用せず、timeoutを長くして1秒超を成功扱いにしない。
+
+- `status: "passed"`
+- `realtimeSession.connectCount: 1`
+- `counts.framesProcessed: 20`、`counts.providerErrors: 0`
+- `concurrency.maxInFlight <= 1`、`concurrency.maxPendingDepth <= 1`
+- `latencyMs.observedToPublish.p95Ms < 1000`
+- `latencyMs.publish.p95Ms < 50`
+
+2026-09-01に`.env.local`の実OpenAI keyで得たproduction defaultの記録:
+
+```text
+model=gpt-realtime-mini
+coldStartMs=1148.025
+connectCount=1
+requestCount=21  # prewarm 1 + 計測 20
+providerErrors=0
+provider p50=523.559ms p95=528.842ms max=539.793ms
+observedToPublish p50=523.840ms p95=529.307ms max=540.052ms
+publish p95=0.297ms
+```
+
+同条件の連続2回目も、接続1回、20件、error 0件、provider p95 524.985ms、
+`observedAt→backend publish` p95 525.223ms、最大618.937msで合格した。
+
+`gpt-realtime-mini`は現在deprecatedであるため恒久的なモデル選択ではない。現行の
+`gpt-realtime-2.1-mini`も同じ画像・prompt条件で比較したが、代表20件のp95が
+1,163.4msとなり1秒ゲートを満たさなかった。後継modelへ切り替える場合は、上の20件
+ゲートを再実行して合格してから`VISION_GUIDANCE_MODEL`を変更する。モデルのimage入力、
+Realtime endpoint、structured outputs非対応は[OpenAIのmodel仕様](https://developers.openai.com/api/docs/models/gpt-realtime-2.1-mini)を参照する。
+
 ## 撮影後 ShotAssessor のデモ切替（OpenSpec 4.5）
 
 `PROVIDER_MODE` はプロセス起動時に選ぶ明示的な provider 選択である。`live`

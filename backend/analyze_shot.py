@@ -24,7 +24,7 @@ from .providers.shot_assessor import (
     ShotAssessmentContractError,
     ShotAssessor,
     ShotAssessorInput,
-    validate_shot_assessment,
+    validate_shot_assessment_for_requested_shot,
 )
 
 
@@ -196,7 +196,9 @@ async def analyze_shot(
         ) from None
 
     try:
-        payload = validate_shot_assessment(raw_assessment).to_payload()
+        payload = validate_shot_assessment_for_requested_shot(
+            raw_assessment, requested_shot
+        ).to_payload()
     except ShotAssessmentContractError:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

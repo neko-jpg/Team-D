@@ -14,22 +14,27 @@ from backend.providers.garment_masker import GarmentMaskContractError, GarmentMa
 from backend.rembg_prewarm import prewarm_rembg
 
 
-# 2x2 PNG fixtures: an RGB front original and a non-empty/non-full L mask.
+# 8x8 PNG fixtures: an RGB front original and a visible 4x4 garment mask.
 FRONT_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DA8J+BkYHh////DAAe9gT9Ce00PgAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGO0yVvF"
+    "gA0wYRUdtBIADaEBZBYuUI8AAAAASUVORK5CYII="
 )
 MASK_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAAAAABX3VL4AAAADklEQVR4nGNg+M/wnwEABgAB/4/x/JoAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAAAAADhZOFXAAAAF0lEQVR4nGNgQAeM"
+    "DAz/wRQTTASTgQkANFIBCDaN9jYAAAAASUVORK5CYII="
 )
 NON_PNG_RESPONSE = b"this is not a PNG image"
 MISMATCHED_MASK_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNoAAAAggCBd81ytgAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAAAcAAAAICAAAAAAQb7raAAAAF0lEQVR4nGNgQAWM"
+    "DAz/QSQTlI9OowMALi0BCCt0LwEAAAAASUVORK5CYII="
 )
 EMPTY_MASK_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAAAAABX3VL4AAAAC0lEQVR4nGNgAAEAAAYAAf6MZ8gAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAAAAADhZOFXAAAADElEQVR4nGNgoA4A"
+    "AABIAAEuuDx+AAAAAElFTkSuQmCC"
 )
 FULL_MASK_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAAAAABX3VL4AAAADklEQVR4nGP4/5/h/38AC/oD/eAlihAAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAAAAADhZOFXAAAAEUlEQVR4nGP8zwAB"
+    "TFCaTAYASUEBDwbdLSQAAAAASUVORK5CYII="
 )
 
 
@@ -66,7 +71,7 @@ def test_prewarm_uses_production_rembg_request_and_returns_verified_mask() -> No
 
     assert original == FRONT_PNG
     assert mask.data == MASK_PNG
-    assert (mask.width, mask.height, mask.mime_type) == (2, 2, "image/png")
+    assert (mask.width, mask.height, mask.mime_type) == (8, 8, "image/png")
     assert client.calls == [
         {
             "url": "http://127.0.0.1:7000/api/remove",

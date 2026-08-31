@@ -13,3 +13,4 @@ __pycache__/
 .cache/rembg/
 tmp/
 *.log
+/data/evaluation/

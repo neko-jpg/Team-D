@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import threading
 import time
@@ -36,6 +37,77 @@ FrameT = TypeVar("FrameT")
 ResultT = TypeVar("ResultT")
 
 Shot = Literal["front", "back", "tag", "measurement"]
+SHOT_COMMAND_TOPIC = "listing-photo.guidance.shot"
+SHOT_COMMAND_TYPE = "set_shot"
+MAX_SHOT_COMMAND_BYTES = 4_096
+
+
+class ShotCommandError(ValueError):
+    """Raised when an inbound capture-step command violates the closed schema."""
+
+
+@dataclass(frozen=True, slots=True)
+class ShotCommand:
+    session_id: str
+    shot: Shot
+    client_revision: int
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.session_id, str)
+            or not self.session_id
+            or self.session_id != self.session_id.strip()
+            or len(self.session_id) > 256
+        ):
+            raise ShotCommandError("sessionId must be a bounded non-empty string")
+        selected = validate_guidance_shot(self.shot)
+        object.__setattr__(self, "shot", selected.value)
+        if (
+            isinstance(self.client_revision, bool)
+            or not isinstance(self.client_revision, int)
+            or self.client_revision < 1
+        ):
+            raise ShotCommandError("clientRevision must be a positive integer")
+
+
+def decode_shot_command(payload: object) -> ShotCommand:
+    """Decode the exact JSON command accepted from a reliable LiveKit packet."""
+
+    if not isinstance(payload, (bytes, bytearray, memoryview)):
+        raise ShotCommandError("shot command payload must be bytes")
+    encoded = bytes(payload)
+    if not encoded or len(encoded) > MAX_SHOT_COMMAND_BYTES:
+        raise ShotCommandError("shot command payload has an invalid size")
+    try:
+        value = json.loads(encoded.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ShotCommandError("shot command payload must be valid UTF-8 JSON") from None
+    if not isinstance(value, dict) or set(value) != {
+        "type",
+        "sessionId",
+        "shot",
+        "clientRevision",
+    }:
+        raise ShotCommandError("shot command contains unknown or missing fields")
+    if value["type"] != SHOT_COMMAND_TYPE:
+        raise ShotCommandError("shot command type must be set_shot")
+    return ShotCommand(
+        session_id=value["sessionId"],  # type: ignore[arg-type]
+        shot=value["shot"],  # type: ignore[arg-type]
+        client_revision=value["clientRevision"],  # type: ignore[arg-type]
+    )
+
+
+def _is_reliable_data_kind(value: object) -> bool:
+    try:
+        from livekit import rtc  # type: ignore[import-not-found]
+
+        expected = getattr(getattr(rtc, "DataPacketKind", None), "KIND_RELIABLE", None)
+        if expected is not None and value == expected:
+            return True
+    except (ImportError, AttributeError, TypeError, ValueError):
+        pass
+    return bool(_enum_strings(value) & {"reliable", "kind_reliable", "kindreliable"})
 
 
 class _QueueSize(int):
@@ -65,6 +137,7 @@ class LatestFrameSlot(Generic[FrameT]):
     def __init__(self) -> None:
         self._frame: Optional[FrameT] = None
         self._observed_at: int | None = None
+        self._observation_generation: int | None = None
         self._has_frame = False
         self._closed = False
         self._replaced_count = 0
@@ -97,7 +170,13 @@ class LatestFrameSlot(Generic[FrameT]):
         with self._lock:
             return self._accepted_count
 
-    def put(self, frame: FrameT, *, observed_at: int | None = None) -> bool:
+    def put(
+        self,
+        frame: FrameT,
+        *,
+        observed_at: int | None = None,
+        observation_generation: int = 0,
+    ) -> bool:
         """Store ``frame`` and return whether it replaced a pending frame.
 
         The method never grows beyond one pending value.  A closed slot rejects
@@ -108,11 +187,18 @@ class LatestFrameSlot(Generic[FrameT]):
         with self._lock:
             if self._closed:
                 return False
+            if (
+                isinstance(observation_generation, bool)
+                or not isinstance(observation_generation, int)
+                or observation_generation < 0
+            ):
+                raise ValueError("observation_generation must be a non-negative integer")
             replaced = self._has_frame
             if replaced:
                 self._replaced_count += 1
             self._frame = frame
             self._observed_at = observed_at
+            self._observation_generation = observation_generation
             self._has_frame = True
             self._accepted_count += 1
             return replaced
@@ -130,15 +216,23 @@ class LatestFrameSlot(Generic[FrameT]):
     def take_observed(self) -> tuple[Optional[FrameT], int | None]:
         """Remove the pending frame together with its enqueue timestamp."""
 
+        frame, observed_at, _generation = self.take_observation()
+        return frame, observed_at
+
+    def take_observation(self) -> tuple[Optional[FrameT], int | None, int | None]:
+        """Remove a frame with the shot generation captured at observation."""
+
         with self._lock:
             if not self._has_frame:
-                return None, None
+                return None, None, None
             frame = self._frame
             observed_at = self._observed_at
+            observation_generation = self._observation_generation
             self._frame = None
             self._observed_at = None
+            self._observation_generation = None
             self._has_frame = False
-            return frame, observed_at
+            return frame, observed_at, observation_generation
 
     get_latest = take
     pop = take
@@ -158,6 +252,7 @@ class LatestFrameSlot(Generic[FrameT]):
             frame = self._frame if self._has_frame else None
             self._frame = None
             self._observed_at = None
+            self._observation_generation = None
             self._has_frame = False
             return frame
 
@@ -224,6 +319,8 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
         self._last_result: Optional[ResultT] = None
         self._last_error: Optional[BaseException] = None
         self._current_observed_at: int | None = None
+        self._observation_generation = 0
+        self._current_observation_generation: int | None = None
 
     @property
     def queue(self) -> LatestFrameSlot[FrameT]:
@@ -252,6 +349,21 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
         """Timestamp captured when the current frame entered the processor."""
 
         return self._current_observed_at
+
+    @property
+    def observation_generation(self) -> int:
+        return self._observation_generation
+
+    @property
+    def current_observation_generation(self) -> int | None:
+        return self._current_observation_generation
+
+    def advance_observation_generation(self) -> int:
+        """Fence and release every frame observed under the previous shot."""
+
+        self._observation_generation += 1
+        self.slot.clear()
+        return self._observation_generation
 
     @property
     def inference_in_flight(self) -> bool:
@@ -322,7 +434,11 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
 
         if self._closed:
             return False
-        self.slot.put(frame, observed_at=self._observation_clock())
+        self.slot.put(
+            frame,
+            observed_at=self._observation_clock(),
+            observation_generation=self._observation_generation,
+        )
         self._max_pending = max(self._max_pending, self.slot.qsize)
         self._ensure_worker()
         return True
@@ -342,17 +458,20 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
     async def _drain(self) -> None:
         try:
             while not self._closed:
-                frame, observed_at = self.slot.take_observed()
+                frame, observed_at, observation_generation = self.slot.take_observation()
                 if frame is None:
                     # ``submit_nowait`` cannot interleave with this synchronous
                     # section on the same event loop.  Clearing the task while
                     # holding this path avoids a race for the next submission.
                     self._worker_task = None
                     return
+                if observation_generation != self._observation_generation:
+                    continue
 
                 self._in_flight = 1
                 self._max_in_flight = max(self._max_in_flight, self._in_flight)
                 self._current_observed_at = observed_at
+                self._current_observation_generation = observation_generation
                 self._last_error = None
                 try:
                     result = self._inference(frame)
@@ -389,6 +508,7 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
                 finally:
                     self._in_flight = 0
                     self._current_observed_at = None
+                    self._current_observation_generation = None
         finally:
             # Cancellation can happen while an inference is awaiting.  A
             # future submit should be able to create a fresh worker.
@@ -818,21 +938,50 @@ class AgentRuntime:
     guidance_transport: GuidanceTransportAdapter | None = None
     _lifecycle_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
     _close_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _command_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
+    _last_client_revision: int = field(default=0, init=False, repr=False)
+    _last_client_shot: Shot | None = field(default=None, init=False, repr=False)
+    _last_lifecycle_error: BaseException | None = field(default=None, init=False, repr=False)
+    _last_command_error: BaseException | None = field(default=None, init=False, repr=False)
 
     @property
     def closed(self) -> bool:
         return self._closed
 
-    async def set_shot(self, shot: object) -> Any:
+    @property
+    def last_client_revision(self) -> int:
+        return self._last_client_revision
+
+    @property
+    def last_lifecycle_error(self) -> BaseException | None:
+        return self._last_lifecycle_error
+
+    @property
+    def last_command_error(self) -> BaseException | None:
+        return self._last_command_error
+
+    async def set_shot(
+        self,
+        shot: object,
+        *,
+        observed_at: object | None = None,
+    ) -> Any:
         """Set the capture step used by both provider input and emitted events."""
 
         selected = validate_guidance_shot(shot)
         previous = self.current_shot
+        if selected.value != previous:
+            # Bind the transition to frame observation, not to eventual
+            # provider execution. Every pending old-shot frame is released.
+            self.subscriber.processor.advance_observation_generation()
         self.current_shot = selected.value
         try:
             if self.guidance_transport is not None:
-                return await self.guidance_transport.set_shot(selected)
+                return await self.guidance_transport.set_shot(
+                    selected,
+                    observed_at=observed_at,
+                )
         except BaseException:
             # A reliable publish may fail only after the transport has already
             # committed the transition and fenced the connection.  Treat its
@@ -844,8 +993,49 @@ class AgentRuntime:
             self.current_shot = (
                 previous if transport_shot is None else transport_shot.value
             )
+            if self.current_shot != selected.value:
+                # Frames which arrived while an uncommitted transition was
+                # publishing cannot be reused after reverting the shot.
+                self.subscriber.processor.advance_observation_generation()
             raise
         return None
+
+    async def apply_shot_command(self, command: ShotCommand) -> Any:
+        """Apply one finite, monotonic client command exactly once."""
+
+        if not isinstance(command, ShotCommand):
+            raise ShotCommandError("command must be a ShotCommand")
+        if self.guidance_transport is None:
+            raise ShotCommandError("guidance transport is unavailable")
+        if command.session_id != self.guidance_transport.session_id:
+            raise ShotCommandError("shot command sessionId does not match this session")
+
+        async with self._command_lock:
+            if command.client_revision < self._last_client_revision:
+                return None
+            if command.client_revision == self._last_client_revision:
+                if self._last_client_shot != command.shot:
+                    raise ShotCommandError(
+                        "clientRevision cannot be reused for a different shot"
+                    )
+                return None
+
+            event = await self.set_shot(command.shot)
+            self._last_client_revision = command.client_revision
+            self._last_client_shot = command.shot
+            self._last_command_error = None
+            return event
+
+    async def handle_data_packet(self, packet: object) -> bool:
+        """Handle a reliable LiveKit shot command packet for this runtime."""
+
+        if getattr(packet, "topic", None) != SHOT_COMMAND_TOPIC:
+            return False
+        if not _is_reliable_data_kind(getattr(packet, "kind", None)):
+            raise ShotCommandError("shot commands require reliable delivery")
+        command = decode_shot_command(getattr(packet, "data", None))
+        await self.apply_shot_command(command)
+        return True
 
     async def mark_disconnected(self) -> bool:
         if self.guidance_transport is None:
@@ -855,10 +1045,20 @@ class AgentRuntime:
     async def on_reconnected(self) -> Any:
         if self.guidance_transport is None:
             return None
+        if self.guidance_transport.connected:
+            self._last_lifecycle_error = None
+            return None
         publisher = getattr(self.room, "local_participant", None)
         if publisher is None:
             raise RuntimeError("LiveKit room has no local participant for guidance")
-        return await self.guidance_transport.on_reconnected(publisher=publisher)
+        result = await self.guidance_transport.on_reconnected(publisher=publisher)
+        self._last_lifecycle_error = None
+        return result
+
+    async def retry_reconnect_snapshot(self) -> Any:
+        """Retry a failed reliable reconnect snapshot without recreating state."""
+
+        return await self.on_reconnected()
 
     async def close(self) -> None:
         """Fence guidance publication, then stop camera processing."""
@@ -886,11 +1086,20 @@ class AgentRuntime:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             self._lifecycle_tasks.clear()
+            self._last_lifecycle_error = None
+            self._last_command_error = None
 
             try:
                 # Subscriber.stop() awaits processor.aclose(), which cancels
                 # and joins an in-flight inference before returning.
                 await self.subscriber.stop()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+
+            try:
+                if self.guidance_transport is not None:
+                    await self.guidance_transport.close_provider()
             except Exception as error:
                 if first_error is None:
                     first_error = error
@@ -914,7 +1123,21 @@ def _attach_guidance_lifecycle(room: Any, runtime: AgentRuntime) -> None:
     def schedule(coroutine: Awaitable[Any]) -> None:
         task = asyncio.create_task(coroutine)
         runtime._lifecycle_tasks.add(task)
-        task.add_done_callback(runtime._lifecycle_tasks.discard)
+
+        def complete(done_task: asyncio.Task[Any]) -> None:
+            runtime._lifecycle_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            try:
+                error = done_task.exception()
+            except asyncio.CancelledError:
+                return
+            if error is not None:
+                # Retrieving the exception prevents "Task exception was never
+                # retrieved" while preserving it for an explicit retry.
+                runtime._last_lifecycle_error = error
+
+        task.add_done_callback(complete)
 
     def reconnecting(*_args: Any) -> None:
         schedule(runtime.mark_disconnected())
@@ -936,6 +1159,41 @@ def _attach_guidance_lifecycle(room: Any, runtime: AgentRuntime) -> None:
             # Current LiveKit Python SDK accepts the documented string events.
             # This preserves offline compatibility with lightweight room fakes.
             continue
+
+
+def _attach_guidance_commands(room: Any, runtime: AgentRuntime) -> None:
+    """Receive finite shot changes from reliable LiveKit data packets."""
+
+    on = getattr(room, "on", None)
+    if not callable(on) or runtime.guidance_transport is None:
+        return
+
+    def handle_data_received(packet: object) -> None:
+        task = asyncio.create_task(
+            runtime.handle_data_packet(packet),
+            name="guidance-shot-command",
+        )
+        runtime._lifecycle_tasks.add(task)
+
+        def complete(done_task: asyncio.Task[Any]) -> None:
+            runtime._lifecycle_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            try:
+                error = done_task.exception()
+            except asyncio.CancelledError:
+                return
+            if error is not None:
+                # Invalid or failed commands are closed failures, never
+                # fire-and-forget task exceptions.
+                runtime._last_command_error = error
+
+        task.add_done_callback(complete)
+
+    try:
+        on("data_received", handle_data_received)
+    except (TypeError, ValueError):
+        return
 
 
 def _auto_subscribe_none() -> Any:
@@ -1012,7 +1270,6 @@ async def start_agent_runtime(
         observation_clock=observation_clock,
     )
     subscriber = CameraVideoTrackSubscriber(processor, stream_factory=stream_factory)
-    subscriber.attach_room(room)
     runtime = AgentRuntime(room=room, subscriber=subscriber)
     runtime_holder["value"] = runtime
     if transport_factory is not None:
@@ -1022,6 +1279,34 @@ async def start_agent_runtime(
         transport_holder["value"] = transport
         runtime.guidance_transport = transport
         _attach_guidance_lifecycle(room, runtime)
+        _attach_guidance_commands(room, runtime)
+        if transport.process_epoch is not None:
+            # A newly created Agent process establishes its epoch and initial
+            # shot before any camera inference can be published. This reliable
+            # state packet is the restart baseline for clients in the same Room.
+            try:
+                await runtime.set_shot(
+                    runtime.current_shot,
+                    observed_at=(
+                        None if observation_clock is None else observation_clock()
+                    ),
+                )
+            except Exception as error:
+                # Keep the runtime alive and the failure observable. The
+                # reliable transport remains fenced until an explicit retry
+                # successfully publishes a resync snapshot.
+                runtime._last_lifecycle_error = error
+        try:
+            # Open and warm a session-owned Realtime connection before any
+            # existing camera publication can feed the inference processor.
+            await transport.prewarm_provider()
+        except Exception as error:
+            # Keep the Room path alive for fixed/local guidance and explicit
+            # recovery. Live failures never become fixture successes.
+            runtime._last_lifecycle_error = error
+    # Do not let a newly published camera track submit the first frame while
+    # a successful Realtime session is still paying its cold-start cost.
+    subscriber.attach_room(room)
     add_shutdown_callback = getattr(ctx, "add_shutdown_callback", None)
     if callable(add_shutdown_callback):
         async def shutdown_callback(*_args: Any) -> None:
@@ -1157,9 +1442,15 @@ __all__ = [
     "LatestFrameQueue",
     "LatestFrameSlot",
     "ObservationClock",
+    "MAX_SHOT_COMMAND_BYTES",
+    "SHOT_COMMAND_TOPIC",
+    "SHOT_COMMAND_TYPE",
     "Shot",
+    "ShotCommand",
+    "ShotCommandError",
     "connect_agent_context",
     "create_agent_server",
+    "decode_shot_command",
     "entrypoint",
     "is_camera_source",
     "is_camera_video_publication",

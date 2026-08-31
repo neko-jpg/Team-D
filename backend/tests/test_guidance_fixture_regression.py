@@ -69,6 +69,7 @@ class GuidanceFixtureRegressionTests(unittest.IsolatedAsyncioTestCase):
             "fixture-regression",
             clock=lambda: 0,
             guidance_ttl_ms=2_000,
+            ready_confirmation_count=1,
         )
         adapter = GuidanceTransportAdapter(
             create_provider_inference(

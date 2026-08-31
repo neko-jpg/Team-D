@@ -46,6 +46,18 @@ class FailOncePublisher(AsyncPublisher):
         self.calls.append((json.loads(payload), reliable))
 
 
+class DropFirstLossyPublisher(AsyncPublisher):
+    def __init__(self) -> None:
+        super().__init__()
+        self.dropped = False
+
+    async def publish_data(self, payload: bytes, *, reliable: bool) -> None:
+        if not reliable and not self.dropped:
+            self.dropped = True
+            return
+        self.calls.append((json.loads(payload), reliable))
+
+
 class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_validated_inference_uses_fixed_copy_and_transport_classes(self) -> None:
         publisher = AsyncPublisher()
@@ -56,7 +68,9 @@ class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
         adapter = GuidanceTransportAdapter(
             infer,
             publisher,
-            state_machine=GuidanceStateMachine("transport", clock=lambda: 1_000),
+            state_machine=GuidanceStateMachine(
+                "transport", clock=lambda: 1_000, ready_confirmation_count=1
+            ),
         )
         event = await adapter.process_frame(b"frame", shot="front")
         assert event is not None
@@ -83,6 +97,61 @@ class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(publisher.calls), 1)
         self.assertTrue(publisher.calls[0][1])
 
+    async def test_default_transport_confirms_ready_twice_and_deduplicates_afterward(self) -> None:
+        publisher = AsyncPublisher()
+
+        async def infer(_frame: object) -> object:
+            return {"code": "READY", "confidence": 1.0}
+
+        adapter = GuidanceTransportAdapter(infer, publisher, session_id="transport")
+
+        self.assertIsNone(await adapter.process_frame(b"first", shot="front"))
+        confirmed = await adapter.process_frame(b"second", shot="front")
+        self.assertIsNotNone(confirmed)
+        self.assertIsNone(await adapter.process_frame(b"third", shot="front"))
+
+        assert confirmed is not None
+        self.assertEqual(confirmed.code.value, "READY")
+        self.assertEqual(
+            [payload.get("type", "guidance") for payload, _ in publisher.calls],
+            ["shot_changed", "heartbeat", "guidance", "heartbeat"],
+        )
+
+    async def test_heartbeat_recovers_dropped_guidance_and_renews_ttl_without_redraw(self) -> None:
+        publisher = DropFirstLossyPublisher()
+
+        async def infer(_frame: object) -> object:
+            return {"code": "CENTER_GARMENT", "confidence": 1.0}
+
+        adapter = GuidanceTransportAdapter(
+            infer,
+            publisher,
+            state_machine=GuidanceStateMachine(
+                "transport", clock=lambda: 1_000, ready_confirmation_count=1
+            ),
+        )
+        first = await adapter.process_frame(b"first", shot="front", observed_at=1_000)
+        duplicate = await adapter.process_frame(
+            b"second", shot="front", observed_at=2_500
+        )
+
+        assert first is not None
+        assert duplicate is None
+        assert publisher.calls[-1] == (
+            {
+                "type": "heartbeat",
+                "sessionId": "transport",
+                "sequence": 3,
+                "shot": "front",
+                "code": "CENTER_GARMENT",
+                "message": "衣類をガイドの中央に合わせてください。",
+                "observedAt": 2_500,
+                "expiresAt": 4_500,
+                "displayChanged": False,
+            },
+            False,
+        )
+
     async def test_disconnect_drops_in_flight_result_then_reconnect_snapshot_precedes_advice(
         self,
     ) -> None:
@@ -98,7 +167,9 @@ class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
         adapter = GuidanceTransportAdapter(
             infer,
             publisher,
-            state_machine=GuidanceStateMachine("transport", clock=lambda: 1_000),
+            state_machine=GuidanceStateMachine(
+                "transport", clock=lambda: 1_000, ready_confirmation_count=1
+            ),
         )
         in_flight = asyncio.create_task(adapter.process_frame(b"old", shot="front"))
         await asyncio.wait_for(started.wait(), timeout=1)
@@ -141,9 +212,12 @@ class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
         release.set()
         self.assertIsNone(await in_flight)
 
-        event = await adapter.process_frame(b"back", shot="back")
+        self.assertIsNone(await adapter.process_frame(b"back-1", shot="back"))
+        event = await adapter.process_frame(b"back-2", shot="back")
         assert event is not None
-        self.assertEqual([payload["sequence"] for payload, _ in publisher.calls], [1, 2, 3])
+        self.assertEqual(
+            [payload["sequence"] for payload, _ in publisher.calls], [1, 2, 3, 4]
+        )
         self.assertEqual(publisher.calls[-1][0]["shot"], "back")
 
     async def test_close_fences_inference_and_rejects_new_operations(self) -> None:
@@ -195,7 +269,9 @@ class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
         adapter = GuidanceTransportAdapter(
             infer,
             publisher,
-            state_machine=GuidanceStateMachine("transport", clock=lambda: 1_000),
+            state_machine=GuidanceStateMachine(
+                "transport", clock=lambda: 1_000, ready_confirmation_count=1
+            ),
         )
         with self.assertRaisesRegex(RuntimeError, "reliable"):
             await adapter.set_shot("front")
@@ -232,7 +308,9 @@ class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
         adapter = GuidanceTransportAdapter(
             infer,
             publisher,
-            state_machine=GuidanceStateMachine("transport", clock=lambda: 1_000),
+            state_machine=GuidanceStateMachine(
+                "transport", clock=lambda: 1_000, ready_confirmation_count=1
+            ),
         )
         with self.assertRaisesRegex(RuntimeError, "reliable"):
             await adapter.process_frame(b"front", shot="front")

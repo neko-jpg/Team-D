@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
+from types import MappingProxyType
 from typing import Mapping, Protocol, runtime_checkable
 
 
@@ -43,6 +44,96 @@ class GuidanceShot(str, Enum):
 
 GUIDANCE_CODES = tuple(code.value for code in GuidanceCode)
 GUIDANCE_SHOTS = tuple(shot.value for shot in GuidanceShot)
+
+_COMMON_GARMENT_CODES = frozenset(
+    {
+        GuidanceCode.MOVE_CLOSER,
+        GuidanceCode.MOVE_FARTHER,
+        GuidanceCode.CENTER_GARMENT,
+        GuidanceCode.SHOW_FULL_GARMENT,
+        GuidanceCode.HOLD_STEADY,
+        GuidanceCode.READY,
+        GuidanceCode.AGENT_UNAVAILABLE,
+    }
+)
+
+# A strict schema can constrain the enum, but only this application-owned
+# mapping can prevent a structurally valid measurement hint from being shown
+# during front capture (or vice versa).
+GUIDANCE_CODES_BY_SHOT: Mapping[GuidanceShot, frozenset[GuidanceCode]] = MappingProxyType(
+    {
+        GuidanceShot.FRONT: _COMMON_GARMENT_CODES
+        | {GuidanceCode.WRONG_SIDE, GuidanceCode.FLATTEN_GARMENT},
+        GuidanceShot.BACK: _COMMON_GARMENT_CODES
+        | {GuidanceCode.WRONG_SIDE, GuidanceCode.FLATTEN_GARMENT},
+        GuidanceShot.TAG: frozenset(
+            {
+                GuidanceCode.MOVE_CLOSER,
+                GuidanceCode.MOVE_FARTHER,
+                GuidanceCode.CENTER_GARMENT,
+                GuidanceCode.MOVE_TO_TAG,
+                GuidanceCode.HOLD_STEADY,
+                GuidanceCode.READY,
+                GuidanceCode.AGENT_UNAVAILABLE,
+            }
+        ),
+        GuidanceShot.MEASUREMENT: _COMMON_GARMENT_CODES
+        | {
+            GuidanceCode.WRONG_SIDE,
+            GuidanceCode.PLACE_MARKER,
+            GuidanceCode.MARKER_NOT_VISIBLE,
+            GuidanceCode.FLATTEN_GARMENT,
+            GuidanceCode.CAMERA_OVERHEAD,
+        },
+    }
+)
+
+# ``HOLD_STEADY`` is derived from temporal frame quality and
+# ``AGENT_UNAVAILABLE`` is emitted by the backend failure path.  They remain
+# valid application events, but a single-image model must never manufacture
+# either state.
+MODEL_GUIDANCE_CODES_BY_SHOT: Mapping[GuidanceShot, frozenset[GuidanceCode]] = (
+    MappingProxyType(
+        {
+            shot: frozenset(
+                code
+                for code in codes
+                if code
+                not in {GuidanceCode.HOLD_STEADY, GuidanceCode.AGENT_UNAVAILABLE}
+                and not (
+                    shot is GuidanceShot.MEASUREMENT
+                    and code is GuidanceCode.WRONG_SIDE
+                )
+            )
+            for shot, codes in GUIDANCE_CODES_BY_SHOT.items()
+        }
+    )
+)
+
+GEOMETRY_GUIDANCE_CODES = frozenset(
+    {
+        GuidanceCode.MOVE_CLOSER,
+        GuidanceCode.MOVE_FARTHER,
+        GuidanceCode.CENTER_GARMENT,
+        GuidanceCode.SHOW_FULL_GARMENT,
+    }
+)
+
+# In the production hybrid path, front/back geometry is owned exclusively by
+# the local mask classifier.  Keeping those codes out of the Realtime tool
+# schema prevents a semantic result from overriding a measured bbox.
+SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT: Mapping[
+    GuidanceShot, frozenset[GuidanceCode]
+] = MappingProxyType(
+    {
+        shot: (
+            frozenset(codes - GEOMETRY_GUIDANCE_CODES)
+            if shot in {GuidanceShot.FRONT, GuidanceShot.BACK}
+            else codes
+        )
+        for shot, codes in MODEL_GUIDANCE_CODES_BY_SHOT.items()
+    }
+)
 
 
 def _enum_value(enum_type: type[Enum], value: object, field: str) -> Enum:
@@ -186,6 +277,48 @@ def validate_vision_decision(value: object) -> VisionDecision:
     raise GuidanceContractError("vision decision must be VisionDecision or an object")
 
 
+def validate_vision_decision_for_shot(value: object, shot: object) -> VisionDecision:
+    """Validate both the finite result shape and its current-step meaning."""
+
+    shot_value = validate_guidance_shot(shot)
+    decision = validate_vision_decision(value)
+    if decision.code not in GUIDANCE_CODES_BY_SHOT[shot_value]:
+        raise GuidanceContractError(
+            f"code {decision.code.value} is not valid for requestedShot={shot_value.value}"
+        )
+    return decision
+
+
+def validate_model_vision_decision_for_shot(
+    value: object, shot: object
+) -> VisionDecision:
+    """Reject application-owned states from a single-image model result."""
+
+    shot_value = validate_guidance_shot(shot)
+    decision = validate_vision_decision(value)
+    if decision.code not in MODEL_GUIDANCE_CODES_BY_SHOT[shot_value]:
+        raise GuidanceContractError(
+            f"code {decision.code.value} is not valid model guidance for "
+            f"requestedShot={shot_value.value}"
+        )
+    return decision
+
+
+def validate_semantic_model_vision_decision_for_shot(
+    value: object, shot: object
+) -> VisionDecision:
+    """Reject geometry codes when the local mask classifier owns them."""
+
+    shot_value = validate_guidance_shot(shot)
+    decision = validate_vision_decision(value)
+    if decision.code not in SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT[shot_value]:
+        raise GuidanceContractError(
+            f"code {decision.code.value} is not valid semantic model guidance for "
+            f"requestedShot={shot_value.value}"
+        )
+    return decision
+
+
 @runtime_checkable
 class VisionGuidanceProvider(Protocol):
     async def analyze(self, input: GuidanceInput) -> VisionDecision | Mapping[str, object]:
@@ -194,8 +327,12 @@ class VisionGuidanceProvider(Protocol):
 
 __all__ = [
     "EncodedImage",
+    "GEOMETRY_GUIDANCE_CODES",
     "GUIDANCE_CODES",
+    "GUIDANCE_CODES_BY_SHOT",
     "GUIDANCE_SHOTS",
+    "MODEL_GUIDANCE_CODES_BY_SHOT",
+    "SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT",
     "GuidanceCode",
     "GuidanceContractError",
     "GuidanceInput",
@@ -205,5 +342,8 @@ __all__ = [
     "validate_guidance_code",
     "validate_guidance_input",
     "validate_guidance_shot",
+    "validate_model_vision_decision_for_shot",
+    "validate_semantic_model_vision_decision_for_shot",
     "validate_vision_decision",
+    "validate_vision_decision_for_shot",
 ]

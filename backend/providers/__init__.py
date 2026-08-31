@@ -21,6 +21,22 @@ from .garment_masker import (
     GarmentMaskerProvider,
     HttpxGarmentMaskHttpClient,
 )
+from .geometry_guidance import (
+    GEOMETRY_MASK_MODEL,
+    GEOMETRY_MASK_TIMEOUT_SECONDS,
+    GEOMETRY_PREWARM_TIMEOUT_SECONDS,
+    GEOMETRY_IMAGE_MAX_EDGE,
+    GEOMETRY_JPEG_QUALITY,
+    GarmentGeometry,
+    GeometryGuidanceContractError,
+    GeometryGuidanceProvider,
+    GeometryGuidanceProviderError,
+    GeometryGuidanceTimeoutError,
+    classify_geometry,
+    classify_mask_geometry,
+    geometry_from_mask_png,
+)
+from .hybrid_vision_guidance import HybridVisionGuidanceAnalyzer
 from .measurement_line import (
     MEASUREMENT_LINE_JSON_SCHEMA,
     MeasurementEndpoints,
@@ -42,12 +58,16 @@ from .runtime import (
     LiveAnalyzer,
     LiveVisionGuidanceProvider,
     ProviderInference,
+    ProviderInferenceAdapter,
     ProviderUnavailableError,
     create_provider_inference,
     create_vision_guidance_provider,
     guidance_input_from_frame,
 )
 from .vision_guidance import (
+    GUIDANCE_CODES_BY_SHOT,
+    GEOMETRY_GUIDANCE_CODES,
+    SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT,
     EncodedImage,
     GuidanceCode,
     GuidanceContractError,
@@ -55,10 +75,17 @@ from .vision_guidance import (
     GuidanceShot,
     VisionDecision,
     VisionGuidanceProvider,
+    validate_vision_decision_for_shot,
 )
 from .vision_guidance_responses import (
     ResponsesVisionGuidanceAnalyzer,
     VISION_GUIDANCE_JSON_SCHEMA,
+)
+from .vision_guidance_realtime import (
+    DEFAULT_REALTIME_GUIDANCE_MODEL,
+    OpenAIRealtimeVisionGuidanceAnalyzer,
+    RealtimeGuidanceError,
+    RealtimeGuidanceTimeoutError,
 )
 from .shot_assessor import (
     AssessmentImage,
@@ -68,6 +95,7 @@ from .shot_assessor import (
     ShotAssessor,
     ShotAssessorInput,
     validate_shot_assessment,
+    validate_shot_assessment_for_requested_shot,
 )
 from .shot_assessor_factory import FixtureShotAssessor, create_shot_assessor
 
@@ -92,10 +120,23 @@ __all__ = [
     "GarmentMaskUnavailableError",
     "GarmentMasker",
     "GarmentMaskerProvider",
+    "GEOMETRY_GUIDANCE_CODES",
+    "GEOMETRY_MASK_MODEL",
+    "GEOMETRY_MASK_TIMEOUT_SECONDS",
+    "GEOMETRY_PREWARM_TIMEOUT_SECONDS",
+    "GEOMETRY_IMAGE_MAX_EDGE",
+    "GEOMETRY_JPEG_QUALITY",
+    "GarmentGeometry",
+    "GeometryGuidanceContractError",
+    "GeometryGuidanceProvider",
+    "GeometryGuidanceProviderError",
+    "GeometryGuidanceTimeoutError",
+    "GUIDANCE_CODES_BY_SHOT",
     "GuidanceCode",
     "GuidanceContractError",
     "GuidanceInput",
     "GuidanceShot",
+    "HybridVisionGuidanceAnalyzer",
     "GeneratedBackground",
     "ImagesClient",
     "LiveAnalyzer",
@@ -109,10 +150,16 @@ __all__ = [
     "MeasurementLineProvider",
     "NormalizedPoint",
     "ProviderInference",
+    "ProviderInferenceAdapter",
     "ProviderUnavailableError",
     "ResponsesMeasurementLineProvider",
     "ResponsesShotAssessor",
     "ResponsesVisionGuidanceAnalyzer",
+    "SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT",
+    "DEFAULT_REALTIME_GUIDANCE_MODEL",
+    "OpenAIRealtimeVisionGuidanceAnalyzer",
+    "RealtimeGuidanceError",
+    "RealtimeGuidanceTimeoutError",
     "ShotAssessment",
     "ShotAssessmentContractError",
     "ShotAssessor",
@@ -124,8 +171,13 @@ __all__ = [
     "create_measurement_line_provider",
     "create_shot_assessor",
     "create_vision_guidance_provider",
+    "classify_geometry",
+    "classify_mask_geometry",
+    "geometry_from_mask_png",
     "guidance_input_from_frame",
     "HttpxGarmentMaskHttpClient",
     "validate_measurement_endpoints",
     "validate_shot_assessment",
+    "validate_shot_assessment_for_requested_shot",
+    "validate_vision_decision_for_shot",
 ]

@@ -12,6 +12,7 @@ LiveKit Agentsをライブ撮影体験の中核にし、小さなReactモバイ�
 - document-autocaptureはMIT表記を保持して必要関数だけ移植
 - OpenCV.jsは50mm専用マーカー検出、射影補正、着丈・身幅の距離計算に限定使用
 - rembg v2.0.81をローカルHTTP sidecarとして実行
+- U-2-NetPをrembg経由のライブ構図mask専用に使用
 - BiRefNet General Liteをrembg経由で使用
 - 合成はnative Canvas 2D、状態管理は`useReducer`
 
@@ -32,9 +33,11 @@ Mobile browser
        │ WebRTC video track        ▲ data packet / RPC push
        ▼                           │
 LiveKit Room ───────────────→ Python LiveKit Agent
-                              ├─ SemanticGuidanceProcessor
+                              ├─ HybridGuidanceProcessor
+                              │    ├─ GeometryGuidanceProvider → rembg / U-2-NetP
+                              │    └─ SemanticGuidanceProvider → OpenAI Realtime
                               ├─ GuidanceStateMachine
-                              └─ VisionGuidanceProvider → video対応AI
+                              └─ VisionGuidanceProvider → finite merged decision
 
 Mobile browser ── HTTPS /api ──→ Python FastAPI
 Python backend package
@@ -58,6 +61,8 @@ Python backend package
 | `MeasurementReview` | 4端点のドラッグ修正、cm再計算、明示承認、手入力fallback |
 | `MeasurementPointSuggester` | 補正済み採寸写真から4つの意味的端点を正規化座標で1回だけ提案 |
 | `SemanticGuidanceProcessor` | Agent側の最新フレーム選択、AI意味判定、古い結果の破棄 |
+| `GeometryGuidanceProvider` | rembg `u2netp` maskの検証、最大連結成分、bbox構図判定 |
+| `HybridGuidanceProcessor` | geometryとsemanticの並列実行、構図優先、fail closed |
 | `GuidanceStateMachine` | AI出力を有限コードへ変換、重複抑制、sequence／expiry付与、push |
 | `CaptureReducer` | 正面→背面→タグ→採寸、撮り直し、受け入れ済み画像と採寸承認の保持 |
 | `ShotAssessor` | 画像AI入力、strict schema、runtime validation |
@@ -164,7 +169,7 @@ Python backend package
 
 OpenCV.jsだけでは「襟ぐり中央」「脇下」の意味点を確実に識別できない。撮影後画像AIが4端点を正規化座標で提案し、OpenCV.jsがcmへ換算する。AI失敗時は輪郭上の粗い線または利用者の端点配置へfallbackし、いずれも利用者補正と明示承認を確定条件にする。
 
-### 4.5 rembg / BiRefNet
+### 4.5 rembg / U-2-NetP / BiRefNet
 
 rembg: [`v2.0.81`](https://github.com/danielgatis/rembg/releases/tag/v2.0.81)、commit [`b439167`](https://github.com/danielgatis/rembg/tree/b439167d2eb22e51e7ec0732efe771bf920ff5c1)
 
@@ -174,6 +179,7 @@ python3.11 -m venv .venv-rembg
 python -m pip install "rembg[cpu,cli]==2.0.81"
 export REMBG_HOME="$PWD/.cache/rembg"
 rembg d birefnet-general-lite
+rembg d u2netp
 rembg s --host 127.0.0.1 --port 7000 --log_level warning --threads 1 --no-ui
 ```
 
@@ -188,9 +194,22 @@ multipart:
 response: image/png mask
 ```
 
+Agentのライブ構図判定も同じloopback sidecarだけを呼ぶ。
+
+```text
+POST http://127.0.0.1:7000/api/remove
+multipart:
+  file=<downscaled front/back frame>
+  model=u2netp
+  om=true
+response: image/png mask
+```
+
 `model`は毎回明示する。省略時の既定`bria-rmbg`は今回のモデル・ライセンス条件と異なるため使用しない。
 
-BiRefNetは単独repoやPyTorchコードを導入せず、rembgの`BiRefNetSessionGeneralLite`と約214MiBのONNX重みだけを使用する。サーバー起動後、本番と同じformでfixture画像を1回POSTしてsessionまでprewarmする。
+U-2-NetPはライブ中の概略bboxだけに使い、透過previewには使わない。rembg v2.0.81が取得する`u2netp.onnx`は4,574,861 bytes、SHA-256 `309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8`へ固定し、`MODEL_CHECKSUM_DISABLED`を設定せず起動前にも独自照合する。配布URLは`https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx`、上流U-2-Net commitは`ac7e1c817ecab7c7dff5ce6b1abba61cd213ff29`、licenseはApache-2.0である。rembg配布ONNXは公式`u2netp.pth`と数値的に一致する一方、変換者・変換手順・license metadataを内包しない。学習元DUTS-TRのannotation権利も含め、顧客へのweight再配布または厳格な商用監査では別途法務確認を必須とする。MVPではweightをブラウザへ配布せずserver-side推論だけに限定する。
+
+BiRefNetは単独repoやPyTorchコードを導入せず、rembgの`BiRefNetSessionGeneralLite`と約214MiBのONNX重みだけを使用する。サーバー起動後、本番と同じformで`u2netp`と`birefnet-general-lite`へfixture画像を各1回POSTして両sessionをprewarmする。
 
 API側は35秒timeout、PNG、元画像との寸法一致、空／全面maskを検証する。自動retryはせず、手動retryか元画像採用へ戻す。
 
@@ -204,7 +223,7 @@ API側は35秒timeout、PNG、元画像との寸法一致、空／全面maskを�
 
 ## 5. ライブ撮影パイプライン
 
-ライブ助言は、低遅延な端末内品質判定と、衣類を理解するAgent側意味判定の2層に分ける。
+ライブ助言は、低遅延な端末内品質判定、Agent側のローカル構図判定、衣類を理解するRealtime意味判定の3層に分ける。
 
 > **設計原則:** リアルタイム性は前処理とアーキテクチャで作り、意味判断の精度だけをAIモデルへ依存させる。
 
@@ -213,7 +232,9 @@ API側は35秒timeout、PNG、元画像との寸法一致、空／全面maskを�
 | LiveKit | WebRTC映像transport、Agent lifecycle、結果push | なし | 常時接続 |
 | 端末内数値前処理 | 明るさ、ブレ、動き、静止状態 | なし | 4Hz |
 | Agent frame selector | 最新フレーム保持、sampling、backpressure、古いframe破棄 | なし | frame到着ごと |
-| `VisionGuidanceProvider` | 衣類の収まり、距離、表裏、タグ移動の意味判定 | あり | 最大1〜2fps |
+| `GeometryGuidanceProvider` | `front|back`の画像端接触、距離、中心ずれ | U-2-NetP maskのみ | 最大4Hz |
+| `SemanticGuidanceProvider` | 表裏、しわ、タグ移動、採寸準備の意味判定 | あり | 最大1〜2fps |
+| `VisionGuidanceProvider` | geometry／semanticの並列合成と有限decision | 間接 | 判定結果ごと |
 | `GuidanceStateMachine` | 有限コード化、固定文言への変換、dedupe、sequence、expiry | なし | 判定結果ごと |
 | `ShotAssessor` | 高解像度撮影画像の最終受理判定 | あり | シャッター後1回 |
 
@@ -229,8 +250,10 @@ camera MediaStream
        → Agent VideoStream frame event
        → latest-frame slot (capacity 1)
        → FrameSelector (shot change / motion settled / sampling limit)
-       → SemanticGuidanceProcessor (max 1 in-flight)
-       → video-capable AI provider
+       → HybridGuidanceProcessor (max 1 in-flight)
+           ├─ rembg / u2netp → mask / bbox → geometry code or PASS
+           └─ OpenAI Realtime → semantic code
+       → geometry correction wins; PASS selects semantic result
        → GuidanceStateMachine
        → LiveKit data packet / RPC
        → React AR overlay
@@ -272,11 +295,11 @@ interface VisionGuidanceProvider {
 }
 ```
 
-AIへ自由文のUIメッセージや画面遷移を決めさせない。providerは有限な`code`と`confidence`だけを返し、runtime validation後に`GuidanceStateMachine`が固定文言、順序、期限を付けて`GuidanceEvent`へ変換する。この境界によりOpenAI Realtime、Responses API、Gemini Live、ローカルVLMをUI変更なしで交換できる。
+AIへ自由文のUIメッセージや画面遷移を決めさせない。`front|back`では最大連結成分が実画像端から1px以内なら`SHOW_FULL_GARMENT`、bbox最大spanが0.42未満なら`MOVE_CLOSER`、0.77超なら`MOVE_FARTHER`、中心軸ずれが0.12超なら`CENTER_GARMENT`とし、それ以外をPASSにする。geometryは`READY`を生成しない。providerは有限な`code`と`confidence`だけを返し、runtime validation後に`GuidanceStateMachine`が固定文言、順序、期限を付けて`GuidanceEvent`へ変換する。本番live経路は撮影セッションごとにprewarmしたOpenAI Realtime WebSocketを1本だけ維持し、各frameを`conversation: none`の独立responseとして送る。front／backのRealtime tool schemaから4構図codeを除き、表裏・しわ・READYだけを意味判定させる。geometry補正を優先してsemanticをcancelし、PASS時だけsemanticを採用する。geometry失敗またはPASS時のsemantic失敗を成功へfallbackせず`AGENT_UNAVAILABLE`へ閉じる。
 
 端末内loopは、`object-fit`を考慮した固定ROIを最大辺320pxへ縮小する。初期閾値はaverage luma 45〜215、Laplacian variance 24以上、normalized frame delta 0.020未満が600ms継続とする。通常4Hz、同時解析1件とし、状態変化から表示までp95 500ms以内を目標にする。
 
-Agent側はframe到着イベントで駆動し、1〜2fpsを上限に意味判定へ渡す。これはブラウザからのHTTP pollingではなく、WebRTC trackをAgentが継続購読し、負荷に応じて最新frameをcoalesceするbackpressureである。処理中の中間frameは保存せず、完了時点の最新frameから次を開始する。
+Agent側はframe到着イベントで駆動し、最大4Hzで意味判定候補を選ぶ。これはブラウザからのHTTP pollingではなく、WebRTC trackをAgentが継続購読し、同時response 1件・待機frame 1件で最新frameをcoalesceするbackpressureである。処理中の中間frameは保存せず、完了時点の最新frameから次を開始する。Realtime入力は最大辺256px、JPEG quality 55、`detail: low`をproduction defaultとする。
 
 ```ts
 type GuidanceEvent = {
@@ -294,7 +317,7 @@ type GuidanceEvent = {
 - 短命な助言はlossy packetで送り、同一`shot`／`code`は変化時だけ送る。
 - shot変更、撮影受理、現在状態の再同期はreliable packetまたはRPCで扱う。
 - frontendは`sessionId`不一致、現在shot不一致、既読以下の`sequence`、`expiresAt`超過を破棄する。
-- AI意味判定の表示目標は観測からp95 2秒以内。目標を外してもqueueを増やさず最新状態を優先する。
+- camera frame受付前にRealtimeと`u2netp` sessionをprewarmする。ローカル構図は450msでtimeoutし、本番と同じHTTPで4code各5件以上、provider error 0件、厳密一致100%、p95 400ms未満を必須ゲートとする。AI意味判定は実`OPENAI_API_KEY`で成功20件以上、provider error 0件、hybrid全体の`observedAt`からbackend publishまでp95 1秒未満を必須ゲートとする。geometryとsemanticは並列に開始し、semantic response deadlineは900ms、transport deadlineは950msとする。cold-startは別計測する。
 - Agent不在時も固定ガイド、端末内品質判定、手動撮影は残す。
 - ライブ結果は助言のみ。front／back／tagの受理は撮影後の高解像度`ShotAssessment`、measurementの受理はマーカー・全体写り・品質検証だけが決める。
 
