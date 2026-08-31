@@ -129,8 +129,12 @@ class GuidanceStateMachineTests(unittest.IsolatedAsyncioTestCase):
 
     def test_sequence_is_strictly_monotonic_and_session_scoped(self) -> None:
         clock = FakeClock()
-        session_a = GuidanceStateMachine("session-a", clock=clock)
-        session_b = GuidanceStateMachine("session-b", clock=clock)
+        session_a = GuidanceStateMachine(
+            "session-a", clock=clock, ready_confirmation_count=1
+        )
+        session_b = GuidanceStateMachine(
+            "session-b", clock=clock, ready_confirmation_count=1
+        )
 
         a1 = session_a.emit("front", VisionDecision("READY", 0.9))  # type: ignore[arg-type]
         b1 = session_b.emit("front", VisionDecision("READY", 0.9))  # type: ignore[arg-type]
@@ -173,7 +177,12 @@ class GuidanceStateMachineTests(unittest.IsolatedAsyncioTestCase):
 
     def test_same_shot_and_code_are_deduplicated_until_state_changes(self) -> None:
         clock = FakeClock(20_000)
-        machine = GuidanceStateMachine("session-dedupe", clock=clock, guidance_ttl_ms=500)
+        machine = GuidanceStateMachine(
+            "session-dedupe",
+            clock=clock,
+            guidance_ttl_ms=500,
+            ready_confirmation_count=1,
+        )
         first = machine.emit("front", {"code": "READY", "confidence": 0.9})
         assert first is not None
 
@@ -192,8 +201,47 @@ class GuidanceStateMachineTests(unittest.IsolatedAsyncioTestCase):
         assert changed_code is not None and changed_shot is not None
         self.assertEqual([first.sequence, changed_code.sequence, changed_shot.sequence], [1, 2, 3])
 
+    def test_ready_can_require_consecutive_confirmation_without_delaying_corrections(self) -> None:
+        machine = GuidanceStateMachine(
+            "session-ready-gate",
+            clock=lambda: 35_000,
+            ready_confirmation_count=2,
+        )
+
+        self.assertIsNone(
+            machine.emit("front", {"code": "READY", "confidence": 1.0})
+        )
+        correction = machine.emit(
+            "front", {"code": "CENTER_GARMENT", "confidence": 1.0}
+        )
+        assert correction is not None
+        self.assertEqual(correction.code, GuidanceCode.CENTER_GARMENT)
+
+        self.assertIsNone(
+            machine.emit("front", {"code": "READY", "confidence": 1.0})
+        )
+        self.assertIsNone(
+            machine.emit("front", {"code": "CENTER_GARMENT", "confidence": 1.0})
+        )
+        self.assertIsNone(
+            machine.emit("front", {"code": "READY", "confidence": 1.0})
+        )
+        confirmed = machine.emit(
+            "front", {"code": "READY", "confidence": 1.0}
+        )
+        assert confirmed is not None
+        self.assertEqual(confirmed.code, GuidanceCode.READY)
+
+        self.assertIsNone(
+            machine.emit("front", {"code": "READY", "confidence": 1.0})
+        )
+
     def test_guidance_is_lossy_and_shot_state_and_resync_are_reliable(self) -> None:
-        machine = GuidanceStateMachine("session-transport", clock=lambda: 40_000)
+        machine = GuidanceStateMachine(
+            "session-transport",
+            clock=lambda: 40_000,
+            ready_confirmation_count=1,
+        )
         guidance = machine.emit("front", {"code": "READY", "confidence": 1.0})
         assert guidance is not None
         self.assertIs(guidance.transport, TransportKind.LOSSY)

@@ -112,6 +112,7 @@ class AgentPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 state_machine=GuidanceStateMachine(
                     "performance-session",
                     clock=clock,
+                    ready_confirmation_count=1,
                 ),
             )
 
@@ -197,6 +198,7 @@ class AgentPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 state_machine=GuidanceStateMachine(
                     "performance-session",
                     clock=clock,
+                    ready_confirmation_count=1,
                 ),
             )
 

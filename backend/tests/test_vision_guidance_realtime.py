@@ -174,6 +174,13 @@ async def test_reuses_one_socket_and_keeps_each_frame_out_of_conversation() -> N
     assert header == "data:image/jpeg;base64"
     with Image.open(BytesIO(base64.b64decode(encoded))) as prepared:
         assert max(prepared.size) == 256
+        guide_pixel = prepared.convert("RGB").getpixel(
+            (round(prepared.width * 0.15), round(prepared.height * 0.15))
+        )
+        assert guide_pixel[1] > 180
+        assert guide_pixel[2] > 180
+        assert guide_pixel[1] - guide_pixel[0] > 50
+        assert guide_pixel[2] - guide_pixel[0] > 50
 
     await analyzer.aclose()
     await analyzer.aclose()
@@ -198,6 +205,74 @@ async def test_invalid_or_wrong_shot_code_is_rejected_after_response_is_drained(
     assert analyzer.connected
     assert client.connections[0].events.empty()
     await analyzer.aclose()
+
+
+@async_test
+async def test_single_image_model_cannot_emit_backend_or_temporal_states() -> None:
+    for forbidden in ("HOLD_STEADY", "AGENT_UNAVAILABLE"):
+        client = FakeClient([forbidden])
+        analyzer = OpenAIRealtimeVisionGuidanceAnalyzer(
+            client,
+            "test-realtime",
+            prewarm=False,
+        )
+
+        with pytest.raises(GuidanceContractError, match="not valid model guidance"):
+            await analyzer(guidance())
+
+        await analyzer.aclose()
+
+
+def test_request_uses_positive_ready_criteria_and_model_only_allowlist() -> None:
+    analyzer = OpenAIRealtimeVisionGuidanceAnalyzer(
+        FakeClient(),
+        "test-realtime",
+        prewarm=False,
+    )
+    input_value = GuidanceInput(
+        frame=EncodedImage(png(), "image/png", 800, 600),
+        requested_shot=GuidanceShot.FRONT,
+        previous_code=GuidanceCode.HOLD_STEADY,
+    )
+
+    request = analyzer.request_for(input_value, request_id="request-1")
+    instructions = request["instructions"]
+    enum = request["tools"][0]["parameters"]["properties"]["code"]["enum"]  # type: ignore[index]
+
+    assert "READY only when" in instructions
+    assert "Never choose READY when unsure" in instructions
+    assert "MOVE_CLOSER" in instructions
+    assert "MOVE_FARTHER" in instructions
+    assert "prev=" not in instructions
+    assert "HOLD_STEADY" not in enum
+    assert "AGENT_UNAVAILABLE" not in enum
+
+
+def test_measurement_request_matches_overlay_and_model_only_rules() -> None:
+    analyzer = OpenAIRealtimeVisionGuidanceAnalyzer(
+        FakeClient(),
+        "test-realtime",
+        prewarm=False,
+    )
+    input_value = GuidanceInput(
+        frame=EncodedImage(png(), "image/png", 800, 600),
+        requested_shot=GuidanceShot.MEASUREMENT,
+    )
+
+    request = analyzer.request_for(input_value, request_id="measurement-1")
+    instructions = request["instructions"]
+    enum = request["tools"][0]["parameters"]["properties"]["code"]["enum"]  # type: ignore[index]
+    camera_image = request["input"][0]["content"][0]  # type: ignore[index]
+    _header, encoded = camera_image["image_url"].split(",", 1)  # type: ignore[index,union-attr]
+
+    assert "cyan rectangle and cross" in instructions
+    assert "WRONG_SIDE" not in enum
+    with Image.open(BytesIO(base64.b64decode(encoded))) as prepared:
+        guide_pixel = prepared.convert("RGB").getpixel(
+            (round(prepared.width * 0.15), round(prepared.height * 0.15))
+        )
+        assert guide_pixel[1] > 180
+        assert guide_pixel[2] > 180
 
 
 @async_test

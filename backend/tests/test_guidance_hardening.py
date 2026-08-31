@@ -222,6 +222,7 @@ async def test_process_epoch_and_heartbeat_are_separate_from_display_dedupe() ->
             "same-room",
             clock=lambda: 1_000,
             process_epoch="epoch-one",
+            ready_confirmation_count=1,
         ),
     )
     first = await adapter.process_frame(b"one", shot="front")
@@ -244,7 +245,11 @@ async def test_process_epoch_and_heartbeat_are_separate_from_display_dedupe() ->
             "sessionId": "same-room",
             "sequence": 3,
             "shot": "front",
+            "code": "READY",
+            "message": "撮影できます。",
             "observedAt": 2_000,
+            "expiresAt": 4_000,
+            "displayChanged": False,
             "processEpoch": "epoch-one",
         },
         False,
@@ -258,6 +263,7 @@ async def test_process_epoch_and_heartbeat_are_separate_from_display_dedupe() ->
             "same-room",
             clock=lambda: 1_000,
             process_epoch="epoch-two",
+            ready_confirmation_count=1,
         ),
     )
     restarted = await replacement.process_frame(b"new", shot="front")
@@ -340,14 +346,17 @@ async def test_deadline_and_provider_error_publish_unavailable_without_worker_er
         adapter.process_frame(b"timeout", shot="front"), timeout=0.2
     )
     second = await adapter.process_frame(b"error", shot="front")
-    recovered = await adapter.process_frame(b"ok", shot="front")
+    unconfirmed = await adapter.process_frame(b"ok-1", shot="front")
+    recovered = await adapter.process_frame(b"ok-2", shot="front")
 
     assert first is not None and first.code.value == "AGENT_UNAVAILABLE"
     assert second is None
+    assert unconfirmed is None
     assert recovered is not None and recovered.code.value == "READY"
     assert [payload.get("type", "guidance") for payload, _ in publisher.calls] == [
         "shot_changed",
         "guidance",
+        "heartbeat",
         "heartbeat",
         "guidance",
     ]

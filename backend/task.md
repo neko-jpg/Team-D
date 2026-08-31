@@ -85,6 +85,17 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 - [x] 6.2 【ともちゃん】timeout時はresponseだけをcancelしてwarm socketを維持し、切断時だけ再接続する。session closeでprovider clientを1回だけ解放する契約テストを通す。
 - [x] 6.3 【健太】`.env.local`の実`OPENAI_API_KEY`で20件を計測し、接続1回、provider error 0件、provider p95 528.842ms、`observedAt→backend publish` p95 529.307ms、backend publish p95 0.297msを確認する。
 
+## 7. 公開実画像による精度・透過検証
+
+- [x] 7.1 【ともちゃん】Open Images V7の公式bbox、human image label、instance segmentation、画像単位のライセンス情報から、衣類16件とGT maskを取得する再現可能なCLIを追加する。人物annotationを除外してもannotation非網羅による着用画像が残るため、raw画像のbbox由来labelをflat-lay、front／back、tag、または最終`READY`の正解として扱わない。
+- [x] 7.2 【ともちゃん】公式GT maskで衣類RGBだけを切り抜き、無地の512px canvasへ遠すぎ、近すぎ、中央ずれ、欠けの4状態を決定的に合成する。16 sourceのうちoccluded／truncated／group／depiction／inside flagがなく、元bboxが画像端に接しない5 sourceだけを採用し、5 source×4状態=20件について画像と同寸のGT mask、変形後の実bbox、元ライセンスをmanifestへ保持する。人手確認していない元画像から`READY`正解を作らない。
+- [x] 7.3 【健太】実OpenAI Realtimeへ上記の非READY 20件を同一sessionで投入し、モデルが返してはならない`HOLD_STEADY`／`AGENT_UNAVAILABLE`をtool schemaから除外する。曖昧時の`READY`を禁止し、front／back解析コピーだけへ固定のシアン枠と中心十字を重ねる。最終構成`gpt-realtime-mini`、256px、low detail、32 tokenでprovider error 0件、接続1回、誤`READY` 0件、禁止code 0件、provider p50 514.854ms／p95 706.506ms／max 794.119msを確認する。別の反復では外部API揺らぎによりprovider error 2件・p95 1.340秒となったため、成功時の1秒経路は確認済みだがインターネットを含む全反復での1秒保証とはしない。
+- [x] 7.4 【健太】production transportでは非READYを1回目から即時配信し、`READY`だけを同じshotの2回連続一致後に配信する。同一shot・同一codeの後続結果は助言を再送せず、現在code、固定message、更新済み`expiresAt`、`displayChanged=false`を持つheartbeatだけにする。最初のlossy助言が欠落しても次のheartbeatから表示を復元できる回帰テストを追加する。
+- [x] 7.5 【ともちゃん】実rembg `birefnet-general-lite`へclean sourceから作った20件を送り、provider error 0件、mean／minimum IoU 0.988096／0.964637、mean／minimum precision 0.991359／0.966008、mean／minimum recall 0.996700／0.990157を確認する。RGBA previewは20/20件で透明・不透明画素を含み、alphaがmaskと一致し、不透明商品画素の元RGBを保持する。ウォーム後の処理時間はp50 4.656秒／p95 4.756秒であり、ライブ助言の1秒経路とは分離した撮影後処理とする。評価器は16件未満、p50 IoU 0.85未満、または1件でもIoU／precision／recall 0.90未満なら失敗にする。
+- [x] 7.6 【健太】上位`gpt-realtime-2`は同じ80件でp95 2.310秒、provider error 39件となり1秒要件を満たさないため採用しない。複数fieldを一度に返す条件分解方式もp95 903.304ms、provider error 7件、誤`READY` 2件へ悪化したため採用せず、検証済みの有限code方式をproduction defaultとして維持する。
+
+非READY構図4分類のexact一致は20件中5件（25%）であり、`MOVE_FARTHER`は0/5だった。公開画像の切り抜きには表裏・平置き・折れの正解がなく、`READY`正例も人手確認していないため、プロダクト全体の助言精度または`READY`再現率とはみなさない。現時点で確認できたのは、有限code契約、危険な誤`READY`抑止、成功runでの1秒以内判定、同一結果の非再描画、lossy欠落からのheartbeat復元、およびclean商品単体20件での透過品質である。front／back／tagの撮影助言精度と撮影後受理精度を完了判定するには、実際の撮影手順で正解を付けた12〜30枚以上を別途用意する。構図codeの精度改善候補としてApache-2.0のRepViT-SAMでmask／bboxを100ms未満に求め、構図NGを決定論的に返す方式を調査したが、backend実行環境と実衣類p95が未確定なためこの変更では本採用していない。
+
 ## 完了条件
 
 - [x] 【ともちゃん】フェーズ1〜5のprovider、FastAPI、Agent transport、外部送信境界が`backend/**`だけで実装され、live失敗がfixture成功へ自動変換されないことを確認する。

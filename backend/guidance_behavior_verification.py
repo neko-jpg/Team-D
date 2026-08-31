@@ -443,6 +443,10 @@ async def _start_runtime(
             state_machine=GuidanceStateMachine(
                 session_id,
                 clock=observation_clock,
+                # This verifier measures one-frame provider/publish latency.
+                # Production READY hardening is covered separately by the
+                # default state-machine and transport contract tests.
+                ready_confirmation_count=1,
             ),
         )
 

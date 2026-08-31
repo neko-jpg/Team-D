@@ -346,15 +346,18 @@ class GuidanceAgentIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.guidance_transport.session_id, "capture-session")
 
         await runtime.set_shot("back")
-        self.assertTrue(runtime.subscriber.processor.submit_nowait(b"back-frame"))
+        self.assertTrue(runtime.subscriber.processor.submit_nowait(b"back-frame-1"))
+        await runtime.subscriber.processor.wait_idle()
+        self.assertTrue(runtime.subscriber.processor.submit_nowait(b"back-frame-2"))
         await runtime.subscriber.processor.wait_idle()
 
-        self.assertEqual(seen_shots, ["back"])
+        self.assertEqual(seen_shots, ["back", "back"])
         self.assertEqual(
             [(payload.get("type", "guidance"), payload["shot"], reliable) for payload, reliable in publisher.calls],
             [
                 ("shot_changed", "front", True),
                 ("shot_changed", "back", True),
+                ("heartbeat", "back", False),
                 ("guidance", "back", False),
             ],
         )

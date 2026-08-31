@@ -62,7 +62,19 @@ _GUIDANCE_FIELDS = frozenset(
     }
 )
 _STATE_FIELDS = frozenset({"type", "sessionId", "sequence", "shot", "code", "observedAt"})
-_HEARTBEAT_FIELDS = frozenset({"type", "sessionId", "sequence", "shot", "observedAt"})
+_HEARTBEAT_FIELDS = frozenset(
+    {
+        "type",
+        "sessionId",
+        "sequence",
+        "shot",
+        "code",
+        "message",
+        "observedAt",
+        "expiresAt",
+        "displayChanged",
+    }
+)
 _PROCESS_EPOCH_FIELD = frozenset({"processEpoch"})
 
 
@@ -153,6 +165,7 @@ class GuidanceTransportAdapter:
                 raise TypeError("session_id is required when state_machine is not supplied")
             state_machine = GuidanceStateMachine(
                 session_id,
+                ready_confirmation_count=2,
                 process_epoch=process_epoch,
             )
         elif session_id is not None and session_id != state_machine.session_id:

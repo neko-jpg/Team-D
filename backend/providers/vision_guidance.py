@@ -88,6 +88,28 @@ GUIDANCE_CODES_BY_SHOT: Mapping[GuidanceShot, frozenset[GuidanceCode]] = Mapping
     }
 )
 
+# ``HOLD_STEADY`` is derived from temporal frame quality and
+# ``AGENT_UNAVAILABLE`` is emitted by the backend failure path.  They remain
+# valid application events, but a single-image model must never manufacture
+# either state.
+MODEL_GUIDANCE_CODES_BY_SHOT: Mapping[GuidanceShot, frozenset[GuidanceCode]] = (
+    MappingProxyType(
+        {
+            shot: frozenset(
+                code
+                for code in codes
+                if code
+                not in {GuidanceCode.HOLD_STEADY, GuidanceCode.AGENT_UNAVAILABLE}
+                and not (
+                    shot is GuidanceShot.MEASUREMENT
+                    and code is GuidanceCode.WRONG_SIDE
+                )
+            )
+            for shot, codes in GUIDANCE_CODES_BY_SHOT.items()
+        }
+    )
+)
+
 
 def _enum_value(enum_type: type[Enum], value: object, field: str) -> Enum:
     if isinstance(value, enum_type):
@@ -242,6 +264,21 @@ def validate_vision_decision_for_shot(value: object, shot: object) -> VisionDeci
     return decision
 
 
+def validate_model_vision_decision_for_shot(
+    value: object, shot: object
+) -> VisionDecision:
+    """Reject application-owned states from a single-image model result."""
+
+    shot_value = validate_guidance_shot(shot)
+    decision = validate_vision_decision(value)
+    if decision.code not in MODEL_GUIDANCE_CODES_BY_SHOT[shot_value]:
+        raise GuidanceContractError(
+            f"code {decision.code.value} is not valid model guidance for "
+            f"requestedShot={shot_value.value}"
+        )
+    return decision
+
+
 @runtime_checkable
 class VisionGuidanceProvider(Protocol):
     async def analyze(self, input: GuidanceInput) -> VisionDecision | Mapping[str, object]:
@@ -253,6 +290,7 @@ __all__ = [
     "GUIDANCE_CODES",
     "GUIDANCE_CODES_BY_SHOT",
     "GUIDANCE_SHOTS",
+    "MODEL_GUIDANCE_CODES_BY_SHOT",
     "GuidanceCode",
     "GuidanceContractError",
     "GuidanceInput",
@@ -262,6 +300,7 @@ __all__ = [
     "validate_guidance_code",
     "validate_guidance_input",
     "validate_guidance_shot",
+    "validate_model_vision_decision_for_shot",
     "validate_vision_decision",
     "validate_vision_decision_for_shot",
 ]

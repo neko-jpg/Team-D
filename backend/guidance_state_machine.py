@@ -192,12 +192,15 @@ class GuidanceStateEvent:
 
 @dataclass(frozen=True, slots=True)
 class GuidanceHeartbeat:
-    """Lossy liveness signal which never asks the UI to redraw its advice."""
+    """Lossy current-state renewal which never asks the UI to redraw advice."""
 
     session_id: str
     sequence: int
     shot: GuidanceShot | None
+    code: GuidanceCode | None
+    message: str | None
     observed_at: int
+    expires_at: int | None
     process_epoch: str | None = None
     transport: TransportKind = TransportKind.LOSSY
 
@@ -207,7 +210,29 @@ class GuidanceHeartbeat:
             raise GuidanceContractError("sequence must be a positive integer")
         if self.shot is not None:
             object.__setattr__(self, "shot", validate_guidance_shot(self.shot))
-        object.__setattr__(self, "observed_at", _timestamp(self.observed_at, "observedAt"))
+        observed_at = _timestamp(self.observed_at, "observedAt")
+        object.__setattr__(self, "observed_at", observed_at)
+        if self.code is None:
+            if self.message is not None or self.expires_at is not None:
+                raise GuidanceContractError(
+                    "heartbeat without code cannot contain message or expiresAt"
+                )
+        else:
+            if self.shot is None:
+                raise GuidanceContractError("heartbeat code requires a shot")
+            decision = validate_vision_decision_for_shot(
+                {"code": self.code, "confidence": 1.0}, self.shot
+            )
+            object.__setattr__(self, "code", decision.code)
+            expected_message = GUIDANCE_MESSAGES[decision.code]
+            if self.message != expected_message:
+                raise GuidanceContractError(
+                    "heartbeat message must use the fixed guidance copy"
+                )
+            expires_at = _timestamp(self.expires_at, "expiresAt")
+            if expires_at <= observed_at:
+                raise GuidanceContractError("expiresAt must be later than observedAt")
+            object.__setattr__(self, "expires_at", expires_at)
         if self.process_epoch is not None:
             object.__setattr__(
                 self,
@@ -223,7 +248,11 @@ class GuidanceHeartbeat:
             "sessionId": self.session_id,
             "sequence": self.sequence,
             "shot": None if self.shot is None else self.shot.value,
+            "code": None if self.code is None else self.code.value,
+            "message": self.message,
             "observedAt": self.observed_at,
+            "expiresAt": self.expires_at,
+            "displayChanged": False,
         }
         if self.process_epoch is not None:
             payload["processEpoch"] = self.process_epoch
@@ -242,6 +271,7 @@ class GuidanceStateMachine:
         *,
         clock: Clock | None = None,
         guidance_ttl_ms: int = 2_000,
+        ready_confirmation_count: int = 2,
         process_epoch: str | None = None,
     ) -> None:
         self._session_id = _non_empty(session_id, "sessionId")
@@ -253,6 +283,15 @@ class GuidanceStateMachine:
         ):
             raise GuidanceContractError("guidance_ttl_ms must be a positive integer")
         self._guidance_ttl_ms = guidance_ttl_ms
+        if (
+            isinstance(ready_confirmation_count, bool)
+            or not isinstance(ready_confirmation_count, int)
+            or ready_confirmation_count < 1
+        ):
+            raise GuidanceContractError(
+                "ready_confirmation_count must be a positive integer"
+            )
+        self._ready_confirmation_count = ready_confirmation_count
         self._process_epoch = (
             None if process_epoch is None else _non_empty(process_epoch, "processEpoch")
         )
@@ -260,6 +299,8 @@ class GuidanceStateMachine:
         self._shot: GuidanceShot | None = None
         self._code: GuidanceCode | None = None
         self._last_key: tuple[GuidanceShot, GuidanceCode] | None = None
+        self._pending_ready_shot: GuidanceShot | None = None
+        self._pending_ready_count = 0
 
     @property
     def session_id(self) -> str:
@@ -291,7 +332,23 @@ class GuidanceStateMachine:
         decision_value = validate_vision_decision_for_shot(decision, shot_value)
         key = (shot_value, decision_value.code)
         if key == self._last_key:
+            # A repeated displayed correction still interrupts a pending READY
+            # confirmation even though it does not require a UI redraw.
+            self._pending_ready_shot = None
+            self._pending_ready_count = 0
             return None
+
+        if decision_value.code is GuidanceCode.READY:
+            if shot_value == self._pending_ready_shot:
+                self._pending_ready_count += 1
+            else:
+                self._pending_ready_shot = shot_value
+                self._pending_ready_count = 1
+            if self._pending_ready_count < self._ready_confirmation_count:
+                return None
+        else:
+            self._pending_ready_shot = None
+            self._pending_ready_count = 0
 
         now = self._now(observed_at)
         event = GuidanceEvent(
@@ -308,6 +365,8 @@ class GuidanceStateMachine:
         self._shot = shot_value
         self._code = decision_value.code
         self._last_key = key
+        self._pending_ready_shot = None
+        self._pending_ready_count = 0
         return event
 
     async def analyze(
@@ -337,6 +396,8 @@ class GuidanceStateMachine:
             self._shot = shot_value
             self._code = None
             self._last_key = None
+            self._pending_ready_shot = None
+            self._pending_ready_count = 0
         return GuidanceStateEvent(
             session_id=self._session_id,
             sequence=self._next_sequence(),
@@ -360,13 +421,19 @@ class GuidanceStateMachine:
         )
 
     def heartbeat(self, *, observed_at: object | None = None) -> GuidanceHeartbeat:
-        """Allocate a liveness sequence without changing display guidance state."""
+        """Renew current state/TTL without asking the UI to redraw equal copy."""
 
+        now = self._now(observed_at)
         return GuidanceHeartbeat(
             session_id=self._session_id,
             sequence=self._next_sequence(),
             shot=self._shot,
-            observed_at=self._now(observed_at),
+            code=self._code,
+            message=(None if self._code is None else GUIDANCE_MESSAGES[self._code]),
+            observed_at=now,
+            expires_at=(
+                None if self._code is None else now + self._guidance_ttl_ms
+            ),
             process_epoch=self._process_epoch,
         )
 

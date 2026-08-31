@@ -171,6 +171,16 @@ async def _run_agent_guidance(image: bytes) -> dict[str, object]:
             )
         )
         await asyncio.wait_for(processor.wait_idle(), timeout=1)
+        confirmed = processor.submit_nowait(
+            EncodedImage(
+                data=image,
+                mime_type="image/png",
+                width=IMAGE_SIZE[0],
+                height=IMAGE_SIZE[1],
+            )
+        )
+        await asyncio.wait_for(processor.wait_idle(), timeout=1)
+        assert confirmed
         before_close = {
             "accepted": accepted,
             "published": publisher.calls,
@@ -317,8 +327,23 @@ def test_fixture_backend_e2e_is_identical_across_two_consecutive_runs() -> None:
         },
         {
             "payload": {
+                "type": "heartbeat",
                 "sessionId": "backend-fixture-e2e",
                 "sequence": 2,
+                "shot": "front",
+                "code": None,
+                "message": None,
+                "observedAt": 1_000,
+                "expiresAt": None,
+                "displayChanged": False,
+                "processEpoch": "backend-fixture-e2e-process",
+            },
+            "reliable": False,
+        },
+        {
+            "payload": {
+                "sessionId": "backend-fixture-e2e",
+                "sequence": 3,
                 "shot": "front",
                 "code": "READY",
                 "message": "撮影できます。",
@@ -333,7 +358,7 @@ def test_fixture_backend_e2e_is_identical_across_two_consecutive_runs() -> None:
     assert agent_result == {
         "accepted": True,
         "published": published,
-        "processedCount": 1,
+        "processedCount": 2,
         "errorCount": 0,
         "currentShot": "front",
         "closed": True,

@@ -18,10 +18,10 @@ from math import isfinite
 from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 from .vision_guidance import (
-    GUIDANCE_CODES_BY_SHOT,
+    MODEL_GUIDANCE_CODES_BY_SHOT,
     EncodedImage,
     GuidanceCode,
     GuidanceContractError,
@@ -29,7 +29,7 @@ from .vision_guidance import (
     GuidanceShot,
     VisionDecision,
     validate_guidance_input,
-    validate_vision_decision_for_shot,
+    validate_model_vision_decision_for_shot,
 )
 
 
@@ -91,20 +91,49 @@ def _bounded_integer(value: object, field: str, minimum: int, maximum: int) -> i
 
 
 def _allowed_codes(shot: GuidanceShot) -> tuple[str, ...]:
-    return tuple(sorted(code.value for code in GUIDANCE_CODES_BY_SHOT[shot]))
+    return tuple(sorted(code.value for code in MODEL_GUIDANCE_CODES_BY_SHOT[shot]))
 
 
-def _instruction_for(shot: GuidanceShot, previous_code: GuidanceCode | None) -> str:
+def _instruction_for(shot: GuidanceShot) -> str:
     allowed = "|".join(_allowed_codes(shot))
-    previous = "NONE" if previous_code is None else previous_code.value
     if shot in {GuidanceShot.FRONT, GuidanceShot.BACK}:
-        criteria = "clipped=SHOW_FULL_GARMENT;off-center=CENTER_GARMENT;wrong-side=WRONG_SIDE;folded=FLATTEN_GARMENT;otherwise=READY"
+        criteria = (
+            "The cyan rectangle and cross are synthetic framing guides, not part of "
+            "the garment. Inspect one flat-laid garment and choose the first matching "
+            "rule: no clear single garment, worn by a person, occluded, ambiguous, "
+            "or touching the actual image boundary=SHOW_FULL_GARMENT; garment size "
+            "below 60% of the cyan guide size=MOVE_CLOSER; garment size above 110% "
+            "of the cyan guide size=MOVE_FARTHER; suitable size but not centered on "
+            "the cyan cross=CENTER_GARMENT; visible side does not match shot="
+            "WRONG_SIDE; materially folded=FLATTEN_GARMENT; READY only when one "
+            "garment is positively confirmed fully visible, flat, expected-side, "
+            "near the cyan guide size, and centered on the cross. Never choose READY "
+            "when unsure"
+        )
     elif shot is GuidanceShot.TAG:
-        criteria = "tag-not-subject=MOVE_TO_TAG;too-small=MOVE_CLOSER;off-center=CENTER_GARMENT;readable=READY"
+        criteria = (
+            "Choose the first matching rule: no clear single garment tag or the "
+            "tag is occluded or ambiguous=MOVE_TO_TAG; tag too small to inspect="
+            "MOVE_CLOSER; tag clipped or overfills frame=MOVE_FARTHER; tag center "
+            "offset above 15%=CENTER_GARMENT; READY only when one tag is positively "
+            "confirmed fully visible, centered, and readable. Never choose READY "
+            "when unsure"
+        )
     else:
-        criteria = "clipped=SHOW_FULL_GARMENT;no-marker=MARKER_NOT_VISIBLE;bad-marker=PLACE_MARKER;not-top-down=CAMERA_OVERHEAD;folded=FLATTEN_GARMENT;otherwise=READY"
+        criteria = (
+            "The cyan rectangle and cross are synthetic framing guides. Choose the "
+            "first matching rule: no clear single flat-laid garment or garment "
+            "touching the actual image boundary=SHOW_FULL_GARMENT; garment size below "
+            "60% of the cyan guide=MOVE_CLOSER; size above 110% of the cyan guide="
+            "MOVE_FARTHER; suitable size but off the cyan cross=CENTER_GARMENT; marker "
+            "missing or occluded="
+            "MARKER_NOT_VISIBLE; marker misplaced=PLACE_MARKER; camera not overhead="
+            "CAMERA_OVERHEAD; garment folded=FLATTEN_GARMENT; READY only when garment "
+            "and marker are positively confirmed fully visible and valid. Never "
+            "choose READY when unsure"
+        )
     return (
-        f"shot={shot.value};prev={previous};{criteria}. "
+        f"shot={shot.value}. {criteria}. "
         f"Call guidance once with one of:{allowed}"
     )
 
@@ -128,6 +157,7 @@ def _guidance_tool(shot: GuidanceShot) -> dict[str, object]:
 def _prepare_image(
     frame: EncodedImage,
     *,
+    shot: GuidanceShot,
     max_edge: int,
     jpeg_quality: int,
 ) -> tuple[str, bytes, int, int]:
@@ -137,6 +167,40 @@ def _prepare_image(
         with Image.open(BytesIO(frame.data)) as source:
             image = ImageOps.exif_transpose(source).convert("RGB")
             image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+            if shot in {
+                GuidanceShot.FRONT,
+                GuidanceShot.BACK,
+                GuidanceShot.MEASUREMENT,
+            }:
+                # Give the vision model the same stable spatial reference that
+                # the camera UI shows without changing or storing the original
+                # frame.  This makes distance and centering a visual comparison
+                # instead of asking a small low-detail model to estimate ratios.
+                width, height = image.size
+                line_width = max(2, round(min(width, height) * 0.012))
+                left = round(width * 0.15)
+                top = round(height * 0.15)
+                right = round(width * 0.85) - 1
+                bottom = round(height * 0.85) - 1
+                center_x = round(width * 0.5)
+                center_y = round(height * 0.5)
+                arm = max(6, round(min(width, height) * 0.04))
+                overlay = ImageDraw.Draw(image)
+                overlay.rectangle(
+                    (left, top, right, bottom),
+                    outline=(0, 255, 255),
+                    width=line_width,
+                )
+                overlay.line(
+                    (center_x - arm, center_y, center_x + arm, center_y),
+                    fill=(0, 255, 255),
+                    width=line_width,
+                )
+                overlay.line(
+                    (center_x, center_y - arm, center_x, center_y + arm),
+                    fill=(0, 255, 255),
+                    width=line_width,
+                )
             output = BytesIO()
             image.save(output, format="JPEG", quality=jpeg_quality, optimize=False)
             encoded = output.getvalue()
@@ -268,6 +332,7 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
         validated = validate_guidance_input(input_value)
         mime_type, encoded, _width, _height = _prepare_image(
             validated.frame,
+            shot=validated.requested_shot,
             max_edge=self._image_max_edge,
             jpeg_quality=self._jpeg_quality,
         )
@@ -276,7 +341,7 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
             "metadata": {"request_id": request_id},
             "output_modalities": ["text"],
             "instructions": instructions
-            or _instruction_for(validated.requested_shot, validated.previous_code),
+            or _instruction_for(validated.requested_shot),
             "max_output_tokens": self._max_output_tokens,
             "tools": [_guidance_tool(validated.requested_shot)],
             "tool_choice": {"type": "function", "name": "guidance"},
@@ -476,7 +541,7 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
                     "Realtime guidance tool output must contain only code"
                 )
             code = payload["code"]
-        return validate_vision_decision_for_shot(
+        return validate_model_vision_decision_for_shot(
             {"code": code, "confidence": self._confidence},
             validated.requested_shot,
         )
