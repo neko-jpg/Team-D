@@ -12,6 +12,12 @@ from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
+from .image_normalization import (
+    ImageNormalizationError,
+    ImageNormalizer,
+    PillowImageNormalizer,
+    PillowUnavailableError,
+)
 from .providers.shot_assessor import (
     AssessmentImage,
     RequestedShot,
@@ -27,6 +33,13 @@ MAX_UPLOAD_BYTES: Final[int] = 10 * 1024 * 1024
 ALLOWED_IMAGE_MIME_TYPES: Final[frozenset[str]] = frozenset(
     {"image/jpeg", "image/png", "image/webp"}
 )
+_NORMALIZATION_ERROR_MESSAGES: Final[dict[str, str]] = {
+    "INVALID_INPUT": "Image could not be decoded",
+    "DECODE_FAILED": "Image could not be decoded",
+    "UNSUPPORTED_FORMAT": "Unsupported image format",
+    "MIME_MISMATCH": "Unsupported image format",
+    "CONVERSION_FAILED": "Image normalization failed",
+}
 
 
 def _provider_error(code: str, message: str, *, retryable: bool) -> dict[str, object]:
@@ -55,6 +68,12 @@ def get_analysis_timeout_seconds() -> float:
     """Dependency seam so timeout behavior is testable without waiting 20 s."""
 
     return ANALYZE_TIMEOUT_SECONDS
+
+
+def get_image_normalizer() -> ImageNormalizer:
+    """Return the stateless normalizer used before any provider call."""
+
+    return PillowImageNormalizer()
 
 
 async def _read_limited_upload(file: UploadFile) -> bytes:
@@ -94,16 +113,59 @@ async def analyze_shot(
     requested_shot: Annotated[RequestedShot, Form(alias="requestedShot")],
     file: Annotated[UploadFile, File()],
     assessor: Annotated[ShotAssessor, Depends(get_shot_assessor)],
+    normalizer: Annotated[ImageNormalizer, Depends(get_image_normalizer)],
     timeout_seconds: Annotated[float, Depends(get_analysis_timeout_seconds)],
 ) -> dict[str, object]:
     """Assess a front/back/tag multipart image within the 20-second budget."""
 
-    image = await _read_limited_upload(file)
+    original_image = await _read_limited_upload(file)
+    try:
+        normalized_image = await asyncio.to_thread(
+            normalizer.normalize,
+            original_image,
+            file.content_type or "",
+        )
+    except PillowUnavailableError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_provider_error(
+                "UNAVAILABLE",
+                "Image normalization is unavailable",
+                retryable=True,
+            ),
+        ) from None
+    except ImageNormalizationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_provider_error(
+                "INVALID_INPUT",
+                _NORMALIZATION_ERROR_MESSAGES.get(
+                    error.code,
+                    "Image normalization failed",
+                ),
+                retryable=False,
+            ),
+        ) from None
+    except Exception:
+        # Keep unexpected image-library failures finite without exposing
+        # decoder or host internals. The provider has not been called yet.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_provider_error(
+                "UNAVAILABLE",
+                "Image normalization is unavailable",
+                retryable=True,
+            ),
+        ) from None
+
     try:
         raw_assessment = await asyncio.wait_for(
             assessor.assess(
                 ShotAssessorInput(
-                    image=AssessmentImage(image, file.content_type or ""),
+                    image=AssessmentImage(
+                        normalized_image.data,
+                        normalized_image.mime_type,
+                    ),
                     requested_shot=requested_shot,
                 )
             ),
@@ -149,5 +211,6 @@ __all__ = [
     "ShotAssessor",
     "analyze_shot_router",
     "get_analysis_timeout_seconds",
+    "get_image_normalizer",
     "get_shot_assessor",
 ]
