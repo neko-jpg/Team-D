@@ -8,7 +8,7 @@
 
 ユーザーが衣類を撮影するたびにAI Agentが写真の内容と品質を確認し、撮り直し方や次に必要な写真を案内する。必要な写真が揃った後は、実物の商品情報を保ったまま背景を整え、ユーザーの承認を経て出品用画像を完成させる。
 
-このリポジトリは、企画要件・技術設計・OSS調査・UIイメージ生成指示をまとめたドキュメントの入口である。
+このリポジトリは、企画要件・技術設計・OSS調査をまとめたドキュメントの入口である。
 
 ## ドキュメント一覧
 
@@ -18,8 +18,6 @@
 | [architecture.md](./architecture.md) | モバイルWeb、画像AI、背景分離、状態管理などの技術構成 |
 | [garment-measurement-oss.md](./garment-measurement-oss.md) | 衣類の半自動採寸に利用できるOSSと実装方法の調査 |
 | [oss-links.md](./oss-links.md) | 採用候補および参考OSSの一覧 |
-| [ekyc-ar-ui-flow-prompt.md](./ekyc-ar-ui-flow-prompt.md) | eKYC型の撮影UIフローを可視化するための初期プロンプト |
-| [ekyc-ar-ui-flow-v2-prompt.md](./ekyc-ar-ui-flow-v2-prompt.md) | AR撮影ガイドと背景選択を強化した改訂版プロンプト |
 
 ## 読む順番
 
