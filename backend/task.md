@@ -43,9 +43,9 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 3.1 【ともちゃん】`GarmentMasker`を`backend/**`へ実装し、front原本をrembgへmultipartの`file`、`model=birefnet-general-lite`、`om=true`で送ってmask-only PNGを取得する。35秒timeout、`image/png`、元画像との寸法一致、空mask、全面maskを検証し、不正なmaskを成功として返さない。
 
-- [ ] 3.2 【健太】FastAPIの`POST /api/remove-background`を`backend/**`へ実装し、`GarmentMasker`をdependencyとして接続する。timeout、非PNG、寸法不一致、空mask、全面maskを有限なAPI errorとして返す。
+- [x] 3.2 【健太】FastAPIの`POST /api/remove-background`を`backend/**`へ実装し、`GarmentMasker`をdependencyとして接続する。timeout、非PNG、寸法不一致、空mask、全面maskを有限なAPI errorとして返す。
 
-- [ ] 3.3 【健太】正常maskと各異常fixtureを使ったcontract／APIテストを`backend/tests/**`へ追加し、不完全なmaskが成功responseにならないことを確認する。
+- [x] 3.3 【健太】正常maskと各異常fixtureを使ったcontract／APIテストを`backend/tests/**`へ追加し、不完全なmaskが成功responseにならないことを確認する。
 
 ## 4. 背景生成provider（元タスク6.3、元タスク6.4のバックエンド部分）
 
