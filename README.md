@@ -12,14 +12,29 @@
 
 ## 開発環境
 
-Node.js 20.19以上とnpmを用意し、次のコマンドでWeb画面とNode.js APIを起動する。
+Node.js 20.19以上、npm、Python 3.11を用意する。FastAPIとLiveKit Agentは同じ
+`backend` Python package（provider schema と設定を共有）として動かす。
 
 ```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r requirements-backend-dev.txt
 npm install
-npm run dev
+npm run dev:fixture
 ```
 
-ViteはWeb画面を公開し、`/api`へのリクエストをloopback上のNode.js APIへ転送する。API単体を開発モードで確認する場合は`npm run dev:api`を実行し、`http://127.0.0.1:3001/api/health`へアクセスする。build後のAPIは`npm run start:api`で起動できる。
+ViteはWeb画面を公開し、`/api`へのリクエストをloopback上のFastAPIへ転送する。
+API単体は`npm run dev:api`、Agent worker は`npm run start:agent:fixture`で起動する。
+LiveKit と live provider を使うときは、`.env.local`を読み込んでから
+`npm run dev:live`（または `npm run start:agent:live`）を使う。`PROVIDER_MODE=live`
+で外部 provider が失敗しても fixture 成功には切り替わらない。
+
+```bash
+curl --fail http://127.0.0.1:3001/api/health
+npm run build
+.venv/bin/python -c 'import backend.app, backend.live_agent; print("python import: ok")'
+npm run test:backend
+npm run verify:backend
+```
 
 ```bash
 npm run typecheck
