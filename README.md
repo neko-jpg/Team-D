@@ -10,6 +10,10 @@
 
 このリポジトリは、企画要件・技術設計・OSS調査をまとめたドキュメントの入口である。
 
+## UIフロー
+
+![衣類の出品撮影を支援するAI AgentのUIフロー](./ekyc-ar-ui-flow-final.png)
+
 ## ドキュメント一覧
 
 | ファイル | 内容 |
@@ -18,6 +22,7 @@
 | [architecture.md](./architecture.md) | モバイルWeb、画像AI、背景分離、状態管理などの技術構成 |
 | [garment-measurement-oss.md](./garment-measurement-oss.md) | 衣類の半自動採寸に利用できるOSSと実装方法の調査 |
 | [oss-links.md](./oss-links.md) | 採用候補および参考OSSの一覧 |
+| [ekyc-ar-ui-flow-final.png](./ekyc-ar-ui-flow-final.png) | AR準備から背景設定までのUIフロー |
 
 ## 読む順番
 
