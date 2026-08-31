@@ -1,27 +1,39 @@
 {
-  "name": "team-d-capture-core",
-  "version": "0.1.0",
+  "name": "team-d-listing-photo-assistant",
   "private": true,
+  "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
-    "dev": "vite --config app/vite.config.ts",
-    "build": "npm run typecheck && vite build --config app/vite.config.ts",
-    "typecheck": "tsc -p app/tsconfig.json --noEmit",
-    "test": "vitest run --config app/vitest.config.ts",
+    "dev": "concurrently -k -n api,web -c yellow,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx watch server/index.ts",
+    "dev:web": "vite --config app/vite.config.ts --host 0.0.0.0",
+    "start:api": "node dist-server/index.js",
+    "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "build:web": "vite build --config app/vite.config.ts",
+    "build:api": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist-server/index.js --sourcemap",
+    "build": "npm run typecheck && npm run build:web && npm run build:api",
+    "test": "vitest run --config app/vitest.config.ts && vitest run --environment node server/app.test.ts",
     "test:watch": "vitest --config app/vitest.config.ts"
   },
   "dependencies": {
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/react": "^19.1.10",
-    "@types/react-dom": "^19.1.7",
-    "@vitejs/plugin-react": "^4.4.1",
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "esbuild": "^0.28.2",
     "jsdom": "^26.1.0",
-    "typescript": "^5.8.3",
-    "vite": "^6.3.5",
-    "vitest": "^3.2.4"
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }
