@@ -11,6 +11,10 @@ import {
   CameraStartError,
   type CameraSession,
 } from "./cameraController";
+import {
+  captureVideoFrame,
+  type CaptureFrameReader,
+} from "./captureFrame";
 import "./camera.css";
 
 export type CameraControllerFactory = (
@@ -18,7 +22,10 @@ export type CameraControllerFactory = (
 ) => CameraSession;
 
 export interface CameraPreviewProps {
+  readonly captureFrame?: CaptureFrameReader;
   readonly createController?: CameraControllerFactory;
+  readonly onCapture?: (blob: Blob) => Promise<void> | void;
+  readonly shot: "back" | "front" | "tag";
 }
 
 type CameraViewState =
@@ -32,6 +39,21 @@ type CameraViewState =
 
 const defaultControllerFactory: CameraControllerFactory = (video) =>
   new CameraController(video);
+
+const shotContent = {
+  front: {
+    action: "襟・袖・裾をガイド内に入れてください",
+    label: "正面",
+  },
+  back: {
+    action: "裏返して背面を上にしてください",
+    label: "背面",
+  },
+  tag: {
+    action: "タグに近づき、枠に合わせてください",
+    label: "タグ",
+  },
+} as const;
 
 function viewError(error: unknown): CameraViewState {
   if (error instanceof CameraStartError) {
@@ -92,24 +114,30 @@ function statusLabel(state: CameraViewState): string {
   }
 }
 
-/**
- * Thin lifecycle verification surface. The final camera overlay and shutter
- * remain separate from this task so the upload fallback stays intact.
- */
+/** Camera lifecycle, fixed guides and manual raw-frame capture surface. */
 export function CameraPreview({
+  captureFrame = captureVideoFrame,
   createController = defaultControllerFactory,
+  onCapture,
+  shot,
 }: CameraPreviewProps): ReactElement {
   const [view, setView] = useState<CameraViewState>({ type: "idle" });
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [captureError, setCaptureError] = useState<string | undefined>();
   const videoRef = useRef<HTMLVideoElement>(null);
   const controllerRef = useRef<CameraSession | undefined>(undefined);
   const mountedRef = useRef(false);
   const attemptRef = useRef(0);
+  const captureActiveRef = useRef(false);
 
   const stopCamera = useCallback((updateView: boolean): void => {
     attemptRef.current += 1;
+    captureActiveRef.current = false;
     controllerRef.current?.stop();
     if (updateView && mountedRef.current) {
       setView({ type: "idle" });
+      setIsCapturing(false);
+      setCaptureError(undefined);
     }
   }, []);
 
@@ -143,6 +171,7 @@ export function CameraPreview({
     const attempt = ++attemptRef.current;
     const controller = controllerRef.current ?? createController(video);
     controllerRef.current = controller;
+    setCaptureError(undefined);
     setView({ type: "requesting" });
 
     try {
@@ -159,6 +188,39 @@ export function CameraPreview({
 
   const isPlaying = view.type === "playing";
   const isRequesting = view.type === "requesting";
+  const currentShot = shotContent[shot];
+
+  const captureCurrentFrame = async (): Promise<void> => {
+    const video = videoRef.current;
+    if (video === null || !isPlaying || captureActiveRef.current) {
+      return;
+    }
+
+    captureActiveRef.current = true;
+    const attempt = attemptRef.current;
+    setCaptureError(undefined);
+    setIsCapturing(true);
+
+    try {
+      const blob = await captureFrame(video);
+      if (!mountedRef.current || attempt !== attemptRef.current) {
+        return;
+      }
+
+      await onCapture?.(blob);
+    } catch {
+      if (mountedRef.current && attempt === attemptRef.current) {
+        setCaptureError(
+          "写真を保存できませんでした。カメラはそのままです。もう一度撮影してください。",
+        );
+      }
+    } finally {
+      if (mountedRef.current && attempt === attemptRef.current) {
+        captureActiveRef.current = false;
+        setIsCapturing(false);
+      }
+    }
+  };
 
   return (
     <section
@@ -169,11 +231,11 @@ export function CameraPreview({
     >
       <div className="camera-preview-heading">
         <div>
-          <p className="camera-preview-kicker">背面カメラ</p>
-          <h3 id="camera-preview-title">カメラプレビュー</h3>
+          <p className="camera-preview-kicker">{currentShot.label}を撮影</p>
+          <h3 id="camera-preview-title">カメラで撮影</h3>
         </div>
         <span className="camera-preview-status" data-testid="camera-status">
-          {statusLabel(view)}
+          {isCapturing ? "撮影中" : statusLabel(view)}
         </span>
       </div>
 
@@ -186,6 +248,20 @@ export function CameraPreview({
           playsInline
           ref={videoRef}
         />
+        <div
+          aria-hidden="true"
+          className={`camera-guide camera-guide--${shot}`}
+          data-testid="camera-guide"
+        >
+          {shot === "tag" ? (
+            <span className="camera-tag-guide" />
+          ) : (
+            <span className="camera-garment-guide" />
+          )}
+        </div>
+        <p className="camera-guidance" aria-live="polite">
+          {currentShot.action}
+        </p>
         {!isPlaying ? (
           <div className="camera-placeholder" aria-hidden="true">
             <span>カメラを起動すると映像が表示されます</span>
@@ -195,13 +271,24 @@ export function CameraPreview({
 
       <div className="camera-preview-actions">
         {isPlaying ? (
-          <button
-            className="camera-secondary-button"
-            onClick={() => stopCamera(true)}
-            type="button"
-          >
-            カメラを停止
-          </button>
+          <div className="camera-playing-controls">
+            <button
+              className="camera-secondary-button"
+              onClick={() => stopCamera(true)}
+              type="button"
+            >
+              停止
+            </button>
+            <button
+              aria-label={`${currentShot.label}を撮影`}
+              className="camera-shutter"
+              disabled={isCapturing}
+              onClick={() => void captureCurrentFrame()}
+              type="button"
+            >
+              <span aria-hidden="true" />
+            </button>
+          </div>
         ) : (
           <button
             className="camera-primary-button"
@@ -217,11 +304,15 @@ export function CameraPreview({
           </button>
         )}
         <p aria-live="polite">
-          背面カメラを確認できます。写真は下の画像選択から追加できます。
+          カメラが使えない場合は、下の画像選択から続けられます。
         </p>
       </div>
 
-      {"message" in view ? (
+      {captureError !== undefined ? (
+        <p className="camera-error" role="alert">
+          {captureError}
+        </p>
+      ) : "message" in view ? (
         <p className="camera-error" role="alert">
           {view.message}
         </p>

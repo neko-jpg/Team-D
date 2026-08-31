@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type ComponentProps,
   type ReactElement,
 } from "react";
 
@@ -63,14 +64,16 @@ function isCaptureShot(value: CaptureState["currentStep"]): value is CaptureShot
   return value === "front" || value === "back" || value === "tag";
 }
 
-function createUploadObjectUrl(file: File): string {
+function createCaptureObjectUrl(blob: Blob): string {
   if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
-    return URL.createObjectURL(file);
+    return URL.createObjectURL(blob);
   }
 
   // jsdom does not provide createObjectURL. The browser path above is always
   // used in the app; this non-empty fallback keeps reducer tests deterministic.
-  return `blob:capture-${file.name}-${file.size}-${file.lastModified}`;
+  const fileName = blob instanceof File ? blob.name : "camera";
+  const lastModified = blob instanceof File ? blob.lastModified : 0;
+  return `blob:capture-${fileName}-${blob.size}-${lastModified}`;
 }
 
 function revokeUploadObjectUrl(url: string): void {
@@ -105,7 +108,7 @@ function statusLabel(state: CaptureState): string {
     case "ready_to_edit":
       return "3枚の写真が揃いました";
     case "capturing":
-      return "写真を選んでください";
+      return "撮影または画像を選んでください";
   }
 }
 
@@ -129,7 +132,20 @@ function assessmentMessage(
   return "この写真は受け付けられません。撮り直してください。";
 }
 
-export function App(): ReactElement {
+type CameraPreviewDependencies = Pick<
+  ComponentProps<typeof CameraPreview>,
+  "captureFrame" | "createController"
+>;
+
+export interface AppProps {
+  readonly captureCameraFrame?: CameraPreviewDependencies["captureFrame"];
+  readonly createCameraController?: CameraPreviewDependencies["createController"];
+}
+
+export function App({
+  captureCameraFrame,
+  createCameraController,
+}: AppProps = {}): ReactElement {
   const [state, reducerDispatch] = useReducer(
     captureReducer,
     initialCaptureState,
@@ -188,26 +204,35 @@ export function App(): ReactElement {
     [dispatch],
   );
 
+  const submitImage = useCallback(
+    (blob: Blob): void => {
+      if (!isCaptureShot(state.currentStep)) {
+        return;
+      }
+
+      const slot = state.currentStep;
+      const objectUrl = createCaptureObjectUrl(blob);
+      objectUrls.current.add(objectUrl);
+      const requestId = createCaptureRequestId();
+      const acceptedShots = SHOT_TYPES.filter(
+        (acceptedSlot) => state.slots[acceptedSlot] !== null,
+      );
+
+      dispatch(captureActions.submitCapture(slot, blob, objectUrl, requestId));
+      runAssessment(assessor, slot, blob, requestId, acceptedShots);
+    },
+    [assessor, dispatch, runAssessment, state.currentStep, state.slots],
+  );
+
   const handleUpload = (event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.target.files?.[0];
     event.target.value = "";
 
-    if (file === undefined || !isCaptureShot(state.currentStep)) {
+    if (file === undefined) {
       return;
     }
 
-    const slot = state.currentStep;
-    const objectUrl = createUploadObjectUrl(file);
-    objectUrls.current.add(objectUrl);
-    const requestId = createCaptureRequestId();
-    const acceptedShots = SHOT_TYPES.filter(
-      (acceptedSlot) => state.slots[acceptedSlot] !== null,
-    );
-
-    dispatch(
-      captureActions.submitCapture(slot, file, objectUrl, requestId),
-    );
-    runAssessment(assessor, slot, file, requestId, acceptedShots);
+    submitImage(file);
   };
 
   const handleRetryAnalysis = (): void => {
@@ -295,7 +320,12 @@ export function App(): ReactElement {
               </span>
             </div>
 
-            <CameraPreview />
+            <CameraPreview
+              captureFrame={captureCameraFrame}
+              createController={createCameraController}
+              onCapture={submitImage}
+              shot={currentCaptureSlot}
+            />
 
             <div className="upload-panel">
               <div className="upload-icon" aria-hidden="true">＋</div>
@@ -355,7 +385,7 @@ export function App(): ReactElement {
             </div>
 
             <p className="helper-text">
-              撮影前の状態にかかわらず、手動アップロードはいつでも使えます。
+              ガイドの状態にかかわらず手動撮影できます。カメラを使えない場合は画像を選んでください。
             </p>
 
             {state.status === "analyzing" ? (

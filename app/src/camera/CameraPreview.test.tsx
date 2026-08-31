@@ -2,7 +2,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CameraPreview } from "./CameraPreview";
+import {
+  CameraPreview,
+  type CameraPreviewProps,
+} from "./CameraPreview";
 import {
   CameraStartError,
   type CameraSession,
@@ -41,14 +44,25 @@ function createSession(
   return session;
 }
 
-function renderPreview(session: CameraSession): HTMLElement {
+function renderPreview(
+  session: CameraSession,
+  props: Omit<CameraPreviewProps, "createController" | "shot"> & {
+    readonly shot?: CameraPreviewProps["shot"];
+  } = {},
+): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.push(root);
 
   act(() => {
-    root.render(<CameraPreview createController={() => session} />);
+    root.render(
+      <CameraPreview
+        {...props}
+        createController={() => session}
+        shot={props.shot ?? "front"}
+      />,
+    );
   });
 
   return container;
@@ -66,6 +80,17 @@ async function clickStart(container: HTMLElement): Promise<void> {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await Promise.resolve();
   });
+}
+
+function shutter(container: HTMLElement): HTMLButtonElement {
+  const button = container.querySelector<HTMLButtonElement>(
+    'button[aria-label$="を撮影"]',
+  );
+  if (button === null) {
+    throw new Error("camera shutter is not rendered");
+  }
+
+  return button;
 }
 
 describe("CameraPreview", () => {
@@ -126,5 +151,139 @@ describe("CameraPreview", () => {
     });
 
     expect(session.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("switches between the garment and tag guides for the requested shot", () => {
+    const session = createSession();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(
+        <CameraPreview createController={() => session} shot="front" />,
+      );
+    });
+
+    const frontGuide = container.querySelector('[data-testid="camera-guide"]');
+    expect(frontGuide?.classList.contains("camera-guide--front")).toBe(true);
+    expect(frontGuide?.getAttribute("aria-hidden")).toBe("true");
+    expect(frontGuide?.querySelector(".camera-garment-guide")).not.toBeNull();
+    expect(container.textContent).toContain(
+      "襟・袖・裾をガイド内に入れてください",
+    );
+
+    act(() => {
+      root.render(
+        <CameraPreview createController={() => session} shot="back" />,
+      );
+    });
+
+    expect(
+      container
+        .querySelector('[data-testid="camera-guide"]')
+        ?.classList.contains("camera-guide--back"),
+    ).toBe(true);
+    expect(container.textContent).toContain("裏返して背面を上にしてください");
+
+    act(() => {
+      root.render(
+        <CameraPreview createController={() => session} shot="tag" />,
+      );
+    });
+
+    const tagGuide = container.querySelector('[data-testid="camera-guide"]');
+    expect(tagGuide?.classList.contains("camera-guide--tag")).toBe(true);
+    expect(tagGuide?.querySelector(".camera-tag-guide")).not.toBeNull();
+    expect(container.textContent).toContain(
+      "タグに近づき、枠に合わせてください",
+    );
+  });
+
+  it("captures manually outside READY and passes the raw Blob unchanged", async () => {
+    const session = createSession();
+    const rawBlob = new Blob(["raw frame"], { type: "image/jpeg" });
+    const captureFrame = vi.fn(async () => rawBlob);
+    const onCapture = vi.fn();
+    const container = renderPreview(session, { captureFrame, onCapture });
+
+    await clickStart(container);
+
+    const video = container.querySelector("video");
+    const captureButton = shutter(container);
+    expect(container.textContent).not.toContain("READY");
+    expect(captureButton.disabled).toBe(false);
+
+    await act(async () => {
+      captureButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captureFrame).toHaveBeenCalledTimes(1);
+    expect(captureFrame).toHaveBeenCalledWith(video);
+    expect(onCapture).toHaveBeenCalledTimes(1);
+    expect(onCapture).toHaveBeenCalledWith(rawBlob);
+    expect(shutter(container).disabled).toBe(false);
+  });
+
+  it("blocks repeated shutter presses while one capture is in flight", async () => {
+    const session = createSession();
+    const rawBlob = new Blob(["raw frame"], { type: "image/jpeg" });
+    let resolveCapture: ((blob: Blob) => void) | undefined;
+    const captureFrame = vi.fn(
+      () =>
+        new Promise<Blob>((resolve) => {
+          resolveCapture = resolve;
+        }),
+    );
+    const onCapture = vi.fn();
+    const container = renderPreview(session, { captureFrame, onCapture });
+
+    await clickStart(container);
+
+    const captureButton = shutter(container);
+    act(() => {
+      captureButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      captureButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(captureFrame).toHaveBeenCalledTimes(1);
+    expect(shutter(container).disabled).toBe(true);
+
+    await act(async () => {
+      resolveCapture?.(rawBlob);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCapture).toHaveBeenCalledTimes(1);
+    expect(shutter(container).disabled).toBe(false);
+  });
+
+  it("keeps the camera usable after a frame capture error", async () => {
+    const session = createSession();
+    const captureFrame = vi.fn(async () => {
+      throw new Error("canvas unavailable");
+    });
+    const container = renderPreview(session, { captureFrame });
+
+    await clickStart(container);
+
+    await act(async () => {
+      shutter(container).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "もう一度撮影してください",
+    );
+    expect(container.querySelector('[data-testid="camera-status"]')?.textContent)
+      .toBe("映像表示中");
+    expect(shutter(container).disabled).toBe(false);
   });
 });
