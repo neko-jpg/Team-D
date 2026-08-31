@@ -63,7 +63,7 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 5.3 【健太】HTTP API／providerが画像、判定、助言、測定状態をDBやファイルへ永続化せず、保存制御可能な外部AI requestでは保存を無効にする。Agent終了時にpending frame参照とin-flight処理を解放するlifecycleテストを`backend/tests/**`へ追加する。（元タスク: 3.15、8.5）
 
-- [ ] 5.4 【ともちゃん】live `MeasurementLineProvider`のtimeout、schema不正、provider errorをfixture成功や架空の4端点へ置き換えず、有限なAPI errorとして返すcontract／APIテストを`backend/tests/**`へ追加する。（元タスク: 5.8）
+- [x] 5.4 【ともちゃん】live `MeasurementLineProvider`のtimeout、schema不正、provider errorをfixture成功や架空の4端点へ置き換えず、有限なAPI errorとして返すcontract／APIテストを`backend/tests/**`へ追加する。（元タスク: 5.8）
 
 - [x] 5.5 【ともちゃん】backendからloopbackのrembgへ本番と同じ`file`、`model=birefnet-general-lite`、`om=true`を送るprewarm helperまたはlive integration testを`backend/**`へ追加し、responseが`image/png`かつ入力frontと同寸法のmask-only画像であることを確認する。（元タスク: 6.1）
 
@@ -71,11 +71,11 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [ ] 5.7 【健太】Agent意味判定の同時実行数1、待機queue最大1、観測から助言event生成までp95 2秒以内、未処理例外0件を計測する。目標外でもqueueを増やさず、最新frameだけを処理することを確認する。（元タスク: 3.17）
 
-- [ ] 5.8 【ともちゃん】fixtureモードでAgent guidance経路と`analyze-shot`、`suggest-measurement-points`、`remove-background`、背景生成providerを順に通すバックエンドE2Eを2回連続で実行し、同じevent、response、error契約を得る。（元タスク: 8.1）
+- [x] 5.8 【ともちゃん】fixtureモードでAgent guidance経路と`analyze-shot`、`suggest-measurement-points`、`remove-background`、背景生成providerを順に通すバックエンドE2Eを2回連続で実行し、同じevent、response、error契約を得る。（元タスク: 8.1）
 
 - [ ] 5.9 【ともちゃん】live smokeとしてAgentのcamera track subscribe、有限codeの変化、撮影後判定、4端点提案、front mask、背景生成providerを順に確認する。ブラウザUI、iPhone操作、Runbook記録はこのタスクへ含めない。（元タスク: 8.2）
 
-- [ ] 5.10 【ともちゃん】Agent停止、撮影後AI timeout、端点提案失敗、rembg timeout／無効mask、背景生成失敗をfixtureで発生させ、成功responseへ自動変換せず、有限なerrorと再試行可能性を返すバックエンド障害マトリクステストを追加する。（元タスク: 8.3）
+- [x] 5.10 【ともちゃん】Agent停止、撮影後AI timeout、端点提案失敗、rembg timeout／無効mask、背景生成失敗をfixtureで発生させ、成功responseへ自動変換せず、有限なerrorと再試行可能性を返すバックエンド障害マトリクステストを追加する。（元タスク: 8.3）
 
 - [ ] 5.11 【健太】Python backend／Agentのunit、contract、API、integration、backend E2EテストをcleanなPython環境で実行し、失敗0件、未処理例外0件を確認する。frontend build、browser console、Safari実機確認は含めない。（元タスク: 8.7）
 
