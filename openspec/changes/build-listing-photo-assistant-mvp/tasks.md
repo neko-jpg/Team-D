@@ -13,26 +13,26 @@
 
 ## 1. 最小の縦スライス（0:30〜2:00）
 
-* [ ] 1.1 【友ちゃんさん】最小縦スライスの責務分割、API境界、front→back→tag→editの完了条件を確定する
+* [x] 1.1 【友ちゃんさん】最小縦スライスの責務分割、API境界、front→back→tag→editの完了条件を確定する
 * [ ] 1.2 【徹平さん】React + TypeScript + ViteとNode.js APIを作成し、`npm install`、型チェック、build、`/api/health`が成功することを確認する
-* [ ] 1.3 【友ちゃんさん】`ShotAssessment`、`LiveCaptureAssessment`、撮影slot、provider errorの共有型とruntime schemaを定義し、未知値と欠落を拒否する単体テストを通す
-* [ ] 1.4 【徹平さん】型付き`useReducer`でfront→back→tag→editの状態遷移を実装し、撮り直しても他slotを保持する単体テストを通す
-* [ ] 1.5 【徹平さん】fixtureの`ShotAssessor`とupload UIを接続し、front／back／tagの3枚が揃うまで編集へ進めない垂直スライスを通す
-* [ ] 1.6 【友ちゃんさん】T+2h時点でupload fixtureが完走しない場合のスコープ削減を判断し、カメラ以外のUI装飾を止めて縦スライスを優先する
+* [x] 1.3 【友ちゃんさん】`ShotAssessment`、`LiveCaptureAssessment`、撮影slot、provider errorの共有型とruntime schemaを定義し、未知値と欠落を拒否する単体テストを通す
+* [x] 1.4 【徹平さん】型付き`useReducer`でfront→back→tag→editの状態遷移を実装し、撮り直しても他slotを保持する単体テストを通す
+* [x] 1.5 【徹平さん】fixtureの`ShotAssessor`とupload UIを接続し、front／back／tagの3枚が揃うまで編集へ進めない垂直スライスを通す
+* [x] 1.6 【友ちゃんさん】T+2h時点でupload fixtureが完走しない場合のスコープ削減を判断し、カメラ以外のUI装飾を止めて縦スライスを優先する
 
 ## 2. カメラとリアルタイム助言（2:00〜3:30）
 
-* [ ] 2.1 【友ちゃんさん】ライブ解析の責務、4Hz・同時解析1、READY判定、手動撮影を阻害しない方針を確定する
+* [x] 2.1 【友ちゃんさん】ライブ解析の責務、4Hz・同時解析1、READY判定、手動撮影を阻害しない方針を確定する
 * [ ] 2.2 【徹平さん】document-autocaptureの`DEFAULT_VIDEO_CONSTRAINTS`、`start()`、`ensureVideoPlayback()`、`cleanupVideoStream()`を限定移植し、背面カメラ起動、権限拒否、track解放を実機で確認する
-* [ ] 2.3 【徹平さん】`scheduleNextFrame()`のrVFC→rAF→timerパターンを4Hz・同時解析1へ変更して実装し、中間フレームを蓄積しないテストを通す
-* [ ] 2.4 【友ちゃんさん】固定ガイドを`object-fit`を考慮して映像PixelRoiへ変換する仕様と入出力を定義する
+* [x] 2.3 【徹平さん】`scheduleNextFrame()`のrVFC→rAF→timerパターンを4Hz・同時解析1へ変更して実装し、中間フレームを蓄積しないテストを通す
+* [x] 2.4 【友ちゃんさん】固定ガイドを`object-fit`を考慮して映像PixelRoiへ変換する仕様と入出力を定義する
 * [ ] 2.5 【徹平さん】PixelRoi変換の純粋関数を実装し、縦横比とクロップのfixtureテストを通す
-* [ ] 2.6 【友ちゃんさん】document-autocaptureの`rgbaToGrayscale()`、`brightnessCheck()`、`laplacianVariance()`の採用基準と閾値方針を決める
+* [x] 2.6 【友ちゃんさん】document-autocaptureの`rgbaToGrayscale()`、`brightnessCheck()`、`laplacianVariance()`の採用基準と閾値方針を決める
 * [ ] 2.7 【徹平さん】上記画像品質判定を出典付きで限定移植し、暗い／明るい／ぼけたfixtureの判定テストを通す
-* [ ] 2.8 【友ちゃんさん】Quadベースの`StabilityTracker`を使わず、連続ROIのframe-differenceで600ms安定を見る方式を確定する
-* [ ] 2.9 【徹平さん】frame-difference trackerを実装し、600ms安定と移動時resetのテストを通す
+* [x] 2.8 【友ちゃんさん】Quadベースの`StabilityTracker`を使わず、連続ROIのframe-differenceで600ms安定を見る方式を確定する
+* [x] 2.9 【徹平さん】frame-difference trackerを実装し、600ms安定と移動時resetのテストを通す
 * [ ] 2.10 【徹平さん】front／back用固定衣類ガイドとtag用矩形をvideo上へ表示し、raw撮影Blobにoverlayが含まれず、`READY`以外でも撮影できることを確認する
-* [ ] 2.11 【友ちゃんさん】Worker／Canvas解析不可時の固定ガイド＋手動撮影、カメラ権限拒否時のfile upload fallbackを仕様として確定する
+* [x] 2.11 【友ちゃんさん】Worker／Canvas解析不可時の固定ガイド＋手動撮影、カメラ権限拒否時のfile upload fallbackを仕様として確定する
 * [ ] 2.12 【健太さん】各fallbackが実際に動くことを確認する
 
 ## 3. 撮影後AI Agent（3:30〜4:45）

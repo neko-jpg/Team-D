@@ -137,3 +137,93 @@ rembgはPython 3.11、v2.0.81、`birefnet-general-lite`を固定し、デモ前�
 6. 基準端末とfixtureで垂直スライスを確認する。
 
 ロールバックはlive providerを停止し、明示的なfixtureモードへ切り替える。撮影済み進捗を黙って成功扱いにはしない。
+
+## 11. Capture core の最小縦スライス契約
+
+1.1 の対象は、カメラや外部AIの実装ではなく、upload fixture だけで撮影開始から編集入口までを再現できる責務境界である。各責務は次の境界を越えて状態を直接変更しない。
+
+| 責務 | 入力 | 出力・権限 |
+|---|---|---|
+| `CaptureReducer` | 型付き action と現在 state | 現在 step、受け入れ済み slot、表示用エラーを更新する唯一の状態遷移点 |
+| `ShotAssessor` | `Blob` と要求中の `front`／`back`／`tag` | strict な `ShotAssessment` または `ProviderError`。slot を直接更新しない |
+| `FixtureShotAssessor` | fixture id と要求中 slot | live provider と同じ `ShotAssessment` 契約。失敗を成功 fixture へ変換しない |
+| `UploadCapture` | file input の `File` | raw Blob と object URL を reducer へ渡す。ガイドや UI を画像へ描画しない |
+| `EditGate` | reducer state | 3 slot が `quality: ok` のときだけ `READY_TO_EDIT` を返す |
+| UI | state と dispatch | 現在 step、残り slot、retry 理由、編集開始を表示する。provider の自由文で遷移しない |
+
+API 境界は `ShotAssessor.assess(input): Promise<ShotAssessment>` とし、live 実装は後から同じ interface に差し替える。HTTP を使う場合も browser は `/api/analyze-shot` だけを呼び、API key や rembg endpoint は client module に公開しない。fixture モードは明示的な `PROVIDER_MODE=fixture` 相当の設定で選択する。
+
+最小縦スライスの完了条件は次のとおりとする。
+
+1. 新規 session は `front` から始まり、`back`、`tag` の順に進む。
+2. `front`、`back`、`tag` の各 slot は raw Blob、object URL、受け入れ済み assessment を保持する。
+3. 要求中 slot と `shotType` が一致し、`quality: ok` の結果だけを受け入れる。不一致、`retry`、`unknown` は対象 slot を置き換えず同じ step に留まる。
+4. 撮り直しは対象 slot のみを差し替え、他の受け入れ済み slot と進捗を保持する。
+5. provider error は進捗を変更せず、同じ画像の retry または撮り直しを提示する。
+6. 3 slot が揃うまで編集入口を表示せず、揃ったときだけ `READY_TO_EDIT` へ進める。
+
+## 12. ライブ解析の責務と判定方針
+
+2.1 では `LiveCaptureAssessment` を撮影前の助言専用とする。ライブフレームは端末内の固定 ROI だけで解析し、撮影後の受理は必ず `ShotAssessment` が行う。通常の解析周期は 4Hz（250ms 間隔）、同時実行は 1 件、解析中に到着したフレームは最新 1 件だけを保持する。古い中間フレームを queue に積まない。
+
+判定は次の閾値を初期値とし、優先順位の高い hint を 1 つだけ表示する。
+
+1. analyzer 例外・Canvas/Worker 不可なら `ANALYZER_UNAVAILABLE`
+2. 平均輝度が 45 未満なら `TOO_DARK`
+3. 平均輝度が 215 超なら `TOO_BRIGHT`
+4. Laplacian 分散が 24 未満なら `TOO_BLURRY`
+5. normalized frame difference が 0.020 以上なら `HOLD_STEADY` かつ安定履歴を reset
+6. 上記を満たし、frame difference が 0.020 未満の状態が 600ms 以上継続したら `READY`
+
+`READY` は撮影可能の目安であり、カメラが利用可能な限り manual shutter は常に有効とする。ライブ判定が遅い、失敗する、または `READY` でないことだけを理由に raw 撮影を禁止しない。
+
+## 13. Fixed guide から video PixelRoi への契約
+
+2.4 の入力と出力は CSS/表示座標と video の intrinsic pixel を混在させない。
+
+```ts
+type NormalizedGuideRect = { x: number; y: number; width: number; height: number };
+type VideoRoiInput = {
+  guide: NormalizedGuideRect;       // 表示領域内の 0..1 比率
+  display: { width: number; height: number }; // CSS pixel
+  video: { width: number; height: number };   // intrinsic pixel
+  objectFit: "cover" | "contain";
+};
+type PixelRoi = { x: number; y: number; width: number; height: number };
+```
+
+`guide` は表示矩形の左上を原点とし、正規化後に 0..1 へ clamp する。`object-fit: cover` では `scale = max(display.width/video.width, display.height/video.height)`、`rendered = video * scale`、`offset = (display - rendered) / 2` を求め、`(displayPoint - offset) / scale` で video pixel へ戻す。`contain` は同じ式で `scale = min(...)` とする。rendered video の外側にある guide 部分は切り捨て、最終矩形は video bounds 内へ clamp する。幅または高さが 1 pixel 未満なら解析対象外として扱う。
+
+video の intrinsic 寸法、表示寸法、guide、object-fit のいずれかが変わったら ROI と安定履歴を再計算・reset する。解析に渡す ROI は最大辺 320px 以下へ縮小する。
+
+## 14. 画像品質 primitive の採用基準
+
+2.6 では document-autocapture の実装パターンだけを限定移植し、書類検出・Quad・perspective warp には依存しない。
+
+- `rgbaToGrayscale`: ROI の RGBA を輝度配列へ変換する端末内 primitive。alpha は RGB の欠落を成功扱いするために使わず、opaque な RGB の輝度を計算する。
+- `brightnessCheck`: grayscale の平均値を返し、`<45` を暗い、`>215` を明るい、それ以外を許容とする。
+- `laplacianVariance`: 隣接 pixel の二次差分分散を返し、`<24` を blurry とする。これは意味理解ではなく撮影品質の助言だけに使う。
+- frame difference: 同一サイズの連続 grayscale ROI に対する normalized mean absolute difference。`<0.020` を安定、以上を移動とする。
+
+閾値はコード上の設定値として差し替え可能にするが、閾値を超えたからといって shutter や撮影後判定を自動で抑止しない。Worker/Canvas 実装が利用できない場合は品質判定を `ANALYZER_UNAVAILABLE` に倒し、固定ガイドと手動撮影を残す。
+
+## 15. StabilityTracker の方式
+
+2.8 は Quad の角点移動量ではなく、同一 PixelRoi の連続 grayscale frame difference を使う。最初の frame は基準として保存するだけで `stable` にはならない。次 frame の normalized difference が閾値未満なら `stableSince` を維持し、閾値以上なら基準 frame と `stableSince` をその frame で置き換える。`now - stableSince >= 600ms` で安定と判定する。
+
+ROI の pixel 数、video 寸法、表示→video 変換が変わったときは履歴を破棄する。解析処理中の frame drop は tracker の時間を進めず、最新 frame の解析が完了した時刻でのみ履歴を更新する。
+
+## 16. Fallback 契約
+
+2.11 の fallback は成功を偽装せず、ユーザーが同じ capture state を継続できることを目的とする。
+
+- Worker または Canvas 解析不可: `ANALYZER_UNAVAILABLE` と固定 front/back/tag guide を表示し、manual shutter を有効にする。raw Blob には overlay を描画しない。
+- カメラ権限拒否、非対応、stream 起動失敗: file input を表示し、upload された画像を manual capture と同じ `ShotAssessor`／reducer 経路へ送る。
+- analyzer/provider の timeout/error: 現在 step と受け入れ済み slot を維持し、同じ画像の retry または撮り直しを選ばせる。
+- fixture/live の切替: 明示設定だけで行い、live の失敗を fixture の成功結果へ自動変換しない。
+
+この切り替えにより、最小縦スライスでは装飾的なカメラ UI より upload fixture の完走を優先する。T+2h 判定では upload の開始→3 slot 受理→`READY_TO_EDIT` が通るかを確認し、通らない場合はカメラ以外の UI 装飾とライブの見た目を停止して、fixture 経路の修復へ集中する。
+
+## 17. T+2h スコープゲートの判定
+
+1.6 の判定として、fixture upload は `front` → `back` → `tag` の受理、撮り直し時の別 slot 保持、provider error 後の進捗維持、3 枚完了後だけの edit gate を自動テストで完走した。したがって、今回のゲートでは追加の削減は不要とする。ただし、カメラ・ライブ品質の見た目や装飾をこの縦スライスの完了条件へ広げず、以降も fixture 経路をデモの基準線として保持する。
