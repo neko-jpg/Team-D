@@ -8,7 +8,7 @@
 
 - [ ] 0.1 【友ちゃんさん】LiveKit projectとAgent用環境変数を用意し、最小接続スクリプトを1回実行して、browser participantとPython Agentのidentityが同じRoomのparticipant一覧と接続ログの両方で確認できることを検証する
 - [ ] 0.2 【友ちゃんさん・徹平さん】LiveKit Agents／Python SDK、LiveKit JS SDK、OpenCV.js／WASMの互換性があるstable versionをlockfileへ固定し、依存がない環境でclean install、SDK import、OpenCV.js Worker初期化、公式配布checksum照合が成功することを検証する
-- [ ] 0.3 【友ちゃんさん】Python 3.11へ`rembg[cpu,cli]==2.0.81`を導入し、`birefnet-general-lite`のdownloadとmask-only prewarm requestが成功することを確認する
+- [x] 0.3 【友ちゃんさん】Python 3.11へ`rembg[cpu,cli]==2.0.81`を導入し、`birefnet-general-lite`のdownloadとmask-only prewarm requestが成功することを確認する
 - [ ] 0.4 【健太さん】front／back／tag／measurement、dark、blur、wrong-side、cropped、正常および`MARKER_MISSING|MARKER_MULTIPLE|MARKER_TOO_SMALL|MARKER_OCCLUDED|GARMENT_OUT_OF_FRAME|GARMENT_MARKER_OVERLAP|SEGMENTATION_FAILED|ENDPOINTS_INVALID`となる採寸画像、既知の着丈・身幅と4端点、mask、背景、`GuidanceEvent`のfixtureと期待結果manifestを用意し、目視結果と期待code／受理可否／次step／採寸値が一致することを確認する
 - [ ] 0.5 【健太さん】LiveKitとOpenCV.jsのApache-2.0、document-autocaptureのMIT、rembg／BiRefNetの製品名、固定version／commit、URL、checksum、license全文または必要なnoticeを`THIRD_PARTY_NOTICES.md`へ記録し、固定済み依存と記載値が一致することを確認する
 - [ ] 0.6 【健太さん】外形50.0mm角・5mm黒枠・内側40.0mm角の白地からなる二重正方形マーカーを100%倍率で印刷し、外形4辺が各50mmであることを定規で確認して、印刷設定と実測結果をrunbookへ記録する
@@ -21,6 +21,8 @@
 - [ ] 1.4 【徹平さん】fixtureのguidance／`ShotAssessment`／採寸結果とupload UIを接続し、`1/4 正面→2/4 背面→3/4 タグ→4/4 採寸`を表示しながら進め、4枚の受理と採寸の明示承認が揃うまで編集開始操作が無効であるUI統合テストを通す
 - [ ] 1.5 【徹平さん】画像、mask、`ShotAssessment`、`GuidanceEvent`、測定端点、採寸値をセッションmemoryとobject URLだけで保持し、DB／`localStorage`／`IndexedDB`へ書き込まないこと、セッション終了時にobject URL、camera track、OpenCV.js Workerを解放することをテストする
 - [ ] 1.6 【友ちゃんさん】T+1.5hでfixture縦スライスが未完ならUI装飾を停止し、Room→guidance push→4枚撮影→採寸確認・承認→出力の本線を優先する判断を行い、継続タスクと停止タスクをrunbookに記録する
+
+> **取り込み済み基盤:** React／TypeScript／ViteとNode.js APIのscaffold、front／back／tagの共有schema、3slotのReducer、fixture `ShotAssessor`、upload UI、retry時のslot保持テストは`origin/main`から取り込み済み。1.1〜1.4は、FastAPI／Agent、measurement契約、4枚目、採寸承認gateを追加するまで部分完了として扱う。
 
 ## 2. LiveKitリアルタイムAI助言と第2章完了ゲート（1:30〜4:00）
 
@@ -36,6 +38,8 @@
 - [ ] 2.10 【徹平さん・健太さん】Room切断／Agent停止時に固定ガイド、端末内品質助言、手動撮影、撮影済みslotを維持し、再接続後に現在shotから再同期する統合テストを通す
 - [ ] 2.11 【健太さん】基準端末で端末内品質解析を4Hz／同時解析1で実行し、端末内の状態変化とAI助言をそれぞれ20件以上計測して、状態変化からUI反映までのp95が500ms以内、AI助言の`observedAt`からUI表示までのp95が2秒以内であることを計測ログで確認し、目標外時もqueueを増やさないことを確認する
 - [ ] 2.12 【徹平さん・健太さん】カメラ権限拒否時は端末内画像uploadで同じ4枚の撮影・採寸フローを継続でき、Canvas／Worker解析不可時は`ANALYZER_UNAVAILABLE`と着丈・身幅の手入力を表示しつつ固定ガイド、Agent助言、手動撮影を維持するfallback統合テストを通す
+
+> **取り込み済み基盤:** 4Hz・同時解析1のschedulerと、中間frameを蓄積しない制御、frame-differenceによる600ms安定判定と移動時resetのテストは`origin/main`から取り込み済み。LiveKit接続、PixelRoi、輝度／ブレ判定、overlay、measurement対応、各fallbackの実動作は未完了。
 
 ### 第2章完了ゲート（2.1〜2.12完了後に順番どおり実行）
 

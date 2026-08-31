@@ -249,3 +249,9 @@ rembgはPython 3.11、v2.0.81、`birefnet-general-lite`を固定し、デモ前�
 8. 基準端末とfixtureで垂直スライスと採寸精度を確認する。
 
 ロールバックはAgentのlive model providerを停止し、明示的なfixture guidanceへ切り替える。LiveKit自体が使えない場合は端末内品質助言＋手動撮影へ縮退する。撮影済み進捗を黙って成功扱いにはしない。
+
+## 9. 取り込み済みcapture coreの位置づけ
+
+`origin/main`から、React／TypeScript／ViteとNode.js APIのscaffold、front／back／tag用の共有契約、fixture `ShotAssessor`、3slotの`CaptureReducer`とupload UI、4Hz scheduler、frame-difference trackerを取り込んだ。これらは最終フローの基盤として再利用する。
+
+現在の3slot完了後に編集入口を開く実装は暫定縦スライスであり、最終完了条件ではない。`measurement` slot、採寸専用validation、`MeasurementLineProvider`、利用者の採寸承認を追加し、4枚と`approved_cv|approved_manual`が揃うまで`READY_TO_EDIT`へ遷移しないよう拡張する。

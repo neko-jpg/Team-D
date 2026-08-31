@@ -10,6 +10,23 @@
 
 このリポジトリは、企画要件・技術設計・OSS調査をまとめたドキュメントの入口である。
 
+## 開発環境
+
+Node.js 20.19以上とnpmを用意し、次のコマンドでWeb画面とNode.js APIを起動する。
+
+```bash
+npm install
+npm run dev
+```
+
+ViteはWeb画面を公開し、`/api`へのリクエストをloopback上のNode.js APIへ転送する。API単体を開発モードで確認する場合は`npm run dev:api`を実行し、`http://127.0.0.1:3001/api/health`へアクセスする。build後のAPIは`npm run start:api`で起動できる。
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
 ## UIフロー
 
 ![衣類の出品撮影を支援するAI AgentのUIフロー](./ekyc-ar-ui-flow-final.png)
