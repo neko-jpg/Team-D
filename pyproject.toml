@@ -1,0 +1,21 @@
+[project]
+name = "listing-photo-assistant-backend"
+version = "0.1.0"
+description = "Python backend for the listing photo assistant: FastAPI provider API and the LiveKit Agent worker."
+requires-python = ">=3.11,<3.12"
+
+# Pinned at implementation start, per architecture.md section 4.1:
+# "実装開始時のstable versionをPython lockfileとnpm lockfileへ固定する".
+#
+# livekit-agents pins livekit==1.1.15 exactly in its own metadata, so the
+# core Python SDK version is resolved through this dependency rather than
+# pinned separately here. See uv.lock for the full resolved set and
+# THIRD_PARTY_NOTICES.md for the license record.
+dependencies = [
+  "livekit-agents==1.7.1",
+]
+
+[tool.uv]
+# No importable package is built from this project yet; the FastAPI server and
+# the Agent worker entrypoints arrive with task 3.3.
+package = false

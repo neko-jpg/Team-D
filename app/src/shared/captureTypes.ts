@@ -1,9 +1,22 @@
-/** Required capture slots for a garment session. */
-export const CAPTURE_SLOTS = ["front", "back", "tag"] as const;
-export const SHOT_SLOTS = CAPTURE_SLOTS;
+/** Shots the post-capture assessor is allowed to judge. */
+export const SHOT_SLOTS = ["front", "back", "tag"] as const;
+export type ShotSlot = (typeof SHOT_SLOTS)[number];
 
-export type CaptureSlot = (typeof CAPTURE_SLOTS)[number];
-export type ShotSlot = CaptureSlot;
+/**
+ * Backward-compatible names for the assessed shot slots.
+ * These stay at three values so post-capture assessment can never
+ * reference the measurement photo.
+ */
+export const CAPTURE_SLOTS = SHOT_SLOTS;
+export type CaptureSlot = ShotSlot;
+
+/**
+ * Every required photo of a garment session, in fixed capture order.
+ * The measurement photo is never used as a listing image and is never
+ * judged by the post-capture assessor.
+ */
+export const SESSION_SLOTS = [...SHOT_SLOTS, "measurement"] as const;
+export type SessionSlot = (typeof SESSION_SLOTS)[number];
 
 /** Shot labels returned by the post-capture assessor. */
 export const SHOT_TYPES = ["front", "back", "tag", "unknown"] as const;
@@ -43,7 +56,7 @@ export interface ShotAssessment {
   shotType: ShotType;
   quality: ShotQuality;
   issues: ShotIssueCode[];
-  missingShots: CaptureSlot[];
+  missingShots: ShotSlot[];
   nextAction: NextAction;
 }
 
@@ -74,6 +87,8 @@ export interface CaptureSlotRecord extends CaptureSlotState {
 /** Providers that cross the Node-side provider boundary. */
 export const PROVIDER_NAMES = [
   "shot-assessor",
+  "vision-guidance",
+  "measurement-line",
   "background-generator",
   "garment-masker",
 ] as const;
