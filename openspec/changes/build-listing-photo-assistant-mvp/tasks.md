@@ -1,40 +1,53 @@
-## 1. プロジェクト基盤と共有契約
+## 0. Preflight（0:00〜0:30）
 
-- [ ] 1.1 React + TypeScript + Vite のフロントエンドと Node.js API の最小構成、開発・テスト用 npm scripts を作成し、`npm install` と `npm run build` が成功することを確認する
-- [ ] 1.2 撮影セッション、ショット種別、`ShotAssessment`、エラー分類、マスク結果、背景 ID、承認状態の共有型を定義し、型チェックが成功することを確認する
-- [ ] 1.3 `ShotAssessment` の列挙値・必須項目・`nextAction` の整合性を runtime schema で検証し、正常値を受け入れ、未知の値・欠落・不正な組み合わせを拒否する単体テストを通す
-- [ ] 1.4 `.env.example`、サーバー専用秘密値の読み込み、Vite の `/api` proxy、外部端末用 host／allowed host／明示的 CORS 設定を追加し、`/api/health` が proxy 経由で応答し、クライアント bundle に秘密値が含まれないことを確認する
-- [ ] 1.5 正面・背面・タグのサンプル画像、成功・撮り直し・誤った種別・上流エラーを再現する fixture provider を追加し、全 fixture ケースを決定的に再生できるテストを通す
+- [ ] 0.1 Python 3.11へ`rembg[cpu,cli]==2.0.81`を導入し、`birefnet-general-lite`を事前downloadして、mask-onlyのprewarm requestが成功することを確認する
+- [ ] 0.2 front／back／tag、dark、blur、wrong-shotのfixture画像と既知maskを用意し、各fixtureを人間が目視確認する
+- [ ] 0.3 Wardrobe `f44006c`、document-autocapture `e24df25`、rembg `b439167`を参照元として固定し、限定移植用の`THIRD_PARTY_NOTICES.md`要件を実装メモへ記録する
 
-## 2. 撮影伴走フロー
+## 1. 最小の縦スライス（0:30〜2:00）
 
-- [ ] 2.1 正面 → 背面 → タグの進捗、受け入れ済み画像、撮り直し、判定中、エラー、完了を扱う Reducer と遷移表を実装し、`COMPLETE` が3種類の成功後にだけ発生し、撮り直しで他の画像が保持される単体テストを通す
-- [ ] 2.2 カメラ撮影と端末画像アップロードの入力、プレビュー、現在の撮影目的を実装し、画像選択から判定開始までのコンポーネントテストが成功することを確認する
-- [ ] 2.3 進捗表示、現在ステップ、問題コードからの日本語案内、撮り直し・次の撮影・撮影完了の操作を実装し、`RETAKE`／`REQUEST_NEXT`／`COMPLETE` ごとの表示テストを通す
-- [ ] 2.4 `POST /api/analyze-shot` の multipart 入力、現在要求中のショット、provider 呼び出し、構造化応答、形式不正・サイズ不正・タイムアウト・上流エラーの変換を実装し、API 契約テストで HTTP 応答と進捗非変更を確認する
-- [ ] 2.5 撮影 UI と判定 API を接続し、成功時は対象スロットだけを更新し、失敗時は再試行またはファイル入力へ戻れるようにし、fixture モードで正面からタグまで一巡するテストを通す
-- [ ] 2.6 Playwright で保存済み画像を使った撮影ハッピーパス、品質不良の撮り直し、誤った撮影種別、API エラー復帰、カメラ入力の代替アップロードを自動検証する
+- [ ] 1.1 React + TypeScript + ViteとNode.js APIを作成し、`npm install`、型チェック、build、`/api/health`が成功することを確認する
+- [ ] 1.2 `ShotAssessment`、`LiveCaptureAssessment`、撮影slot、provider errorの共有型とruntime schemaを定義し、未知値と欠落を拒否する単体テストを通す
+- [ ] 1.3 型付き`useReducer`でfront→back→tag→editの状態遷移を実装し、撮り直しても他slotを保持する単体テストを通す
+- [ ] 1.4 fixtureの`ShotAssessor`とupload UIを接続し、front／back／tagの3枚が揃うまで編集へ進めない垂直スライスを通す
+- [ ] 1.5 T+2h時点でupload fixtureが完走しない場合、カメラ以外のUI装飾を止めて縦スライスを優先する
 
-## 3. 商品を保持する背景編集
+## 2. カメラとリアルタイム助言（2:00〜3:30）
 
-- [ ] 3.1 `POST /api/remove-background` の画像入力、マスク provider、PNG 等のマスク応答、タイムアウト・不正マスク・上流エラー処理を実装し、fixture provider を差し替えた API 契約テストを通す
-- [ ] 3.2 元画像・商品マスク・背景を独立レイヤーとして合成する Canvas 処理を実装し、固定サンプルで商品マスク内の元画像情報が保持され、マスク外だけが背景になることを画像処理テストで確認する
-- [ ] 3.3 白・木目・グレー等の固定背景プリセット、選択状態、マスク処理中、マスク失敗の表示を実装し、背景を切り替えても元画像とマスクが再利用されることをコンポーネントテストで確認する
-- [ ] 3.4 元画像と編集後画像を比較できる表示、編集後画像の初期未承認状態、元画像採用、編集後画像採用、取り消し操作を実装し、承認前の画像が出力できないテストを通す
-- [ ] 3.5 承認済み画像を端末へ保存または次の出品操作へ渡す出力を実装し、編集後画像を採用した場合と元画像を採用した場合に正しい画像だけが出力されることをテストする
-- [ ] 3.6 撮影完了から背景編集への遷移を接続し、未完了の撮影では編集を開始できず、マスク処理失敗時は元画像を保持して再試行または元画像採用へ戻れることを Playwright で検証する
+- [ ] 2.1 document-autocaptureの`DEFAULT_VIDEO_CONSTRAINTS`、`start()`、`ensureVideoPlayback()`、`cleanupVideoStream()`を限定移植し、背面カメラ起動、権限拒否、track解放を実機で確認する
+- [ ] 2.2 `scheduleNextFrame()`のrVFC→rAF→timerパターンを4Hz・同時解析1へ変更して実装し、中間フレームを蓄積しないテストを通す
+- [ ] 2.3 固定ガイドを`object-fit`を考慮して映像PixelRoiへ変換する純粋関数を実装し、縦横比とクロップのfixtureテストを通す
+- [ ] 2.4 document-autocaptureの`rgbaToGrayscale()`、`brightnessCheck()`、`laplacianVariance()`を出典付きで限定移植し、暗い／明るい／ぼけたfixtureの判定テストを通す
+- [ ] 2.5 Quadベースの`StabilityTracker`を使わず連続ROIのframe-difference trackerを実装し、600ms安定と移動時resetのテストを通す
+- [ ] 2.6 front／back用固定衣類ガイドとtag用矩形をvideo上へ表示し、raw撮影Blobにoverlayが含まれず、`READY`以外でも撮影できることを確認する
+- [ ] 2.7 Worker／Canvas解析が使えない場合は固定ガイド＋手動撮影、カメラ権限拒否時はfile uploadへ戻れることを確認する
 
-## 4. 外部サービス・セキュリティ・信頼性
+## 3. 撮影後AI Agent（3:30〜4:45）
 
-- [ ] 4.1 実画像 AI provider を構造化出力で実装し、プロンプトから画面遷移命令を受け取らず、許可された判定スキーマへ変換できることを provider 契約テストで確認する
-- [ ] 4.2 rembg HTTP server と初期候補モデルを接続する masker provider を実装し、実サービス未起動・タイムアウト・不正応答時に fixture または再試行へ切り替わり、編集済み画像を誤承認しないことを確認する
-- [ ] 4.3 fixture／live provider の切り替えを明示的な環境設定に限定し、API キーやサービス URL を `VITE_` 変数・ブラウザログ・通常のサーバーログへ出さないことをテストまたはログ検査で確認する
-- [ ] 4.4 セッション終了時に一時画像・判定結果・マスクデータを解放し、後続セッションから参照できないこと、リクエスト本文や画像 base64 が永続保存されないことを lifecycle テストで確認する
-- [ ] 4.5 API の入力サイズ、MIME、タイムアウト、エラー応答、ログの秘匿を確認し、異常系の契約テストと `npm run lint`／`npm run typecheck` が成功することを確認する
+- [ ] 3.1 Wardrobeの`normalizeImage()`の処理順を参考に、原本を保持したまま解析コピーだけをEXIF回転・sRGB化する処理を実装し、向きの異なるfixtureで確認する
+- [ ] 3.2 Wardrobeの`openAIAnalyze()`を参考に、画像入力＋strict JSON Schemaの`ShotAssessor`を新規実装し、front／back／tag／unknownと問題コードの契約テストを通す
+- [ ] 3.3 `POST /api/analyze-shot`へmultipart入力、20秒timeout、MIME／サイズ検証、runtime schema検証を追加し、失敗時に進捗が変わらないAPIテストを通す
+- [ ] 3.4 ライブ`READY`でも撮影後AIが`retry`なら同じstepへ戻り、理由付きの案内になる統合テストを通す
+- [ ] 3.5 T+5h時点でlive AIが不安定ならfixtureをデモ本線として明示し、live失敗を黙って成功へ変換しない
 
-## 5. 統合検証と実機デモ準備
+## 4. 正面画像のmaskと背景生成（4:45〜6:15）
 
-- [ ] 5.1 fixture モードで「撮影開始 → 正面／背面／タグ → 撮り直し → マスク → 背景選択 → 比較 → 承認 → 出力」の垂直スライスを Playwright で通し、仕様の各 Scenario に対応する結果を確認する
-- [ ] 5.2 実サービス設定で画像 AI と rembg を接続し、代表的な平置き衣類サンプルについて判定結果、マスク範囲、元画像保持、失敗時の復帰を手動確認する
-- [ ] 5.3 Vite の HTTPS トンネル設定と実行手順を README または開発用 runbook に記載し、PC のアップロードと iPhone Safari または Android Chrome の実機カメラ入力で smoke test を完了する
-- [ ] 5.4 `npm run build`、全自動テスト、OpenSpec の `openspec validate "build-listing-photo-assistant-mvp" --type change --strict --no-interactive` を実行し、仕様の必須 Scenario と実装・検証結果の対応をレビューする
+- [ ] 4.1 rembgをloopbackの7000番で`--threads 1 --no-ui`起動し、`file`、`model=birefnet-general-lite`、`om=true`でPNG maskを返すことを確認する
+- [ ] 4.2 `POST /api/remove-background`と`GarmentMasker`を実装し、35秒timeout、PNG、元画像との寸法一致、空／全面maskを検証するAPIテストを通す
+- [ ] 4.3 `BackgroundGenerator`を実装し、許可styleから固定promptを作り、商品画像を送らずテキストだけで背景を生成する契約テストを通す
+- [ ] 4.4 背景生成へ60秒timeoutと固定背景fallbackを追加し、失敗しても撮影slotと正面原本が保持されることを確認する
+- [ ] 4.5 maskと背景生成を正面1枚だけへ適用し、backとtagの原本が変更されないテストを通す
+
+## 5. 合成・承認・保存（6:15〜7:15）
+
+- [ ] 5.1 native Canvas 2Dで背景、正面原本、maskを合成し、商品mask内が元画像RGB、mask外が背景になる画像fixtureテストを通す
+- [ ] 5.2 元画像と合成画像の比較、初期未承認、合成採用、元画像採用を実装し、未承認previewを保存できないテストを通す
+- [ ] 5.3 承認済み正面画像を`toBlob`でPNGまたはJPEG保存し、正しい画像だけが出力されることを確認する
+- [ ] 5.4 T+6.5hで合成が完了していない場合、生成背景を止めて白背景1種へ固定し、比較・承認・保存を優先する
+
+## 6. 統合検証とデモ準備（7:15〜8:00）
+
+- [ ] 6.1 fixtureで「ライブ助言→front／back／tag→撮り直し→mask→背景→比較→承認→保存」を通し、各OpenSpec Scenarioとの対応を確認する
+- [ ] 6.2 live providerで代表トップス1着を実機撮影し、4Hz解析、撮影後判定、正面mask、背景生成、合成を手動確認する
+- [ ] 6.3 rembg prewarm、`/api/health`、fixture/live切替、ngrok起動、timeout時の操作をrunbookへ記載して再実行する
+- [ ] 6.4 `npm run build`、型チェック、主要テスト、`openspec validate "build-listing-photo-assistant-mvp" --type change --strict --no-interactive`を成功させる
