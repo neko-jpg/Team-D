@@ -10,6 +10,7 @@ __pycache__/
 !.env.example
 .venv/
 .venv-rembg/
+.venv-livekit/
 .cache/rembg/
 tmp/
 *.log
