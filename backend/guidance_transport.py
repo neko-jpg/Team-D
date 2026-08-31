@@ -195,13 +195,22 @@ class GuidanceTransportAdapter:
         return publisher  # type: ignore[return-value]
 
     async def _publish(self, event: Event) -> Event:
-        payload = encode_guidance_event(event)
-        result = self._publisher.publish_data(
-            payload,
-            reliable=isinstance(event, GuidanceStateEvent),
-        )
-        if inspect.isawaitable(result):
-            await result
+        reliable = isinstance(event, GuidanceStateEvent)
+        try:
+            payload = encode_guidance_event(event)
+            result = self._publisher.publish_data(payload, reliable=reliable)
+            if inspect.isawaitable(result):
+                await result
+        except BaseException:
+            if reliable:
+                # A failed reliable packet leaves the peer's state unknown.  The
+                # state machine has already allocated its sequence, so retrying
+                # that event is unsafe; fence this Room and require a successful
+                # reliable resync before any later lossy advice can be emitted.
+                self._connected = False
+                self._connection_generation += 1
+                self._frame_generation += 1
+            raise
         return event
 
     async def set_shot(

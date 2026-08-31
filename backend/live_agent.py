@@ -22,11 +22,13 @@ import inspect
 import logging
 import threading
 from collections.abc import AsyncIterable, Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Generic, Literal, Optional, TypeVar
 
 from .settings import BackendSettings
+from .guidance_transport import GuidanceTransportAdapter
+from .providers.vision_guidance import validate_guidance_shot
 
 
 FrameT = TypeVar("FrameT")
@@ -163,6 +165,7 @@ class LatestFrameSlot(Generic[FrameT]):
 Inference = Callable[[FrameT], ResultT | Awaitable[ResultT]]
 ResultSink = Callable[[ResultT, FrameT], Any]
 ErrorSink = Callable[[BaseException, FrameT], Any]
+GuidanceTransportFactory = Callable[[Any, Callable[[], Shot]], GuidanceTransportAdapter]
 
 
 class LatestFrameProcessor(Generic[FrameT, ResultT]):
@@ -753,13 +756,98 @@ class CameraVideoTrackSubscriber:
     close = stop
 
 
-@dataclass(frozen=True)
+@dataclass
 class AgentRuntime:
     """Runtime handles returned after an Agent context joins a room."""
 
     room: Any
     subscriber: CameraVideoTrackSubscriber
     current_shot: Shot = "front"
+    guidance_transport: GuidanceTransportAdapter | None = None
+    _lifecycle_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
+
+    async def set_shot(self, shot: object) -> Any:
+        """Set the capture step used by both provider input and emitted events."""
+
+        selected = validate_guidance_shot(shot)
+        previous = self.current_shot
+        self.current_shot = selected.value
+        try:
+            if self.guidance_transport is not None:
+                return await self.guidance_transport.set_shot(selected)
+        except BaseException:
+            # A reliable publish may fail only after the transport has already
+            # committed the transition and fenced the connection.  Treat its
+            # state as authoritative so a later resync and provider inference
+            # cannot disagree about the selected shot.  Errors before a
+            # transition leave ``current_shot`` unset on the transport, so the
+            # prior runtime value remains the compatible fallback.
+            transport_shot = self.guidance_transport.current_shot
+            self.current_shot = (
+                previous if transport_shot is None else transport_shot.value
+            )
+            raise
+        return None
+
+    async def mark_disconnected(self) -> bool:
+        if self.guidance_transport is None:
+            return False
+        return await self.guidance_transport.mark_disconnected()
+
+    async def on_reconnected(self) -> Any:
+        if self.guidance_transport is None:
+            return None
+        publisher = getattr(self.room, "local_participant", None)
+        if publisher is None:
+            raise RuntimeError("LiveKit room has no local participant for guidance")
+        return await self.guidance_transport.on_reconnected(publisher=publisher)
+
+    async def close(self) -> None:
+        """Fence guidance publication, then stop camera processing."""
+
+        if self.guidance_transport is not None:
+            await self.guidance_transport.close()
+        tasks = tuple(self._lifecycle_tasks)
+        for task in tasks:
+            if task is not asyncio.current_task() and not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await self.subscriber.stop()
+
+
+def _attach_guidance_lifecycle(room: Any, runtime: AgentRuntime) -> None:
+    """Map LiveKit Room connection events to the transport lifecycle."""
+
+    on = getattr(room, "on", None)
+    if not callable(on) or runtime.guidance_transport is None:
+        return
+
+    def schedule(coroutine: Awaitable[Any]) -> None:
+        task = asyncio.create_task(coroutine)
+        runtime._lifecycle_tasks.add(task)
+        task.add_done_callback(runtime._lifecycle_tasks.discard)
+
+    def reconnecting(*_args: Any) -> None:
+        schedule(runtime.mark_disconnected())
+
+    def disconnected(*_args: Any) -> None:
+        schedule(runtime.mark_disconnected())
+
+    def reconnected(*_args: Any) -> None:
+        schedule(runtime.on_reconnected())
+
+    for event, callback in (
+        ("reconnecting", reconnecting),
+        ("disconnected", disconnected),
+        ("reconnected", reconnected),
+    ):
+        try:
+            on(event, callback)
+        except (TypeError, ValueError):
+            # Current LiveKit Python SDK accepts the documented string events.
+            # This preserves offline compatibility with lightweight room fakes.
+            continue
 
 
 def _auto_subscribe_none() -> Any:
@@ -809,24 +897,47 @@ async def start_agent_runtime(
     on_result: Optional[ResultSink[Any, Any]] = None,
     on_error: Optional[ErrorSink] = None,
     stream_factory: Optional[Callable[[Any], Any]] = None,
+    transport_factory: GuidanceTransportFactory | None = None,
 ) -> AgentRuntime:
     """Connect, attach camera-only handlers, and subscribe existing tracks."""
 
     room = await connect_agent_context(ctx)
-    processor = LatestFrameProcessor(inference, on_result=on_result, on_error=on_error)
+    runtime_holder: dict[str, AgentRuntime] = {}
+    transport_holder: dict[str, GuidanceTransportAdapter | None] = {"value": None}
+
+    async def process_frame(frame: Any) -> Any:
+        transport = transport_holder["value"]
+        if transport is None:
+            result = inference(frame)
+            return await _maybe_await(result)
+        return await transport.process_frame(
+            frame,
+            shot=runtime_holder["value"].current_shot,
+        )
+
+    processor = LatestFrameProcessor(process_frame, on_result=on_result, on_error=on_error)
     subscriber = CameraVideoTrackSubscriber(processor, stream_factory=stream_factory)
     subscriber.attach_room(room)
+    runtime = AgentRuntime(room=room, subscriber=subscriber)
+    runtime_holder["value"] = runtime
+    if transport_factory is not None:
+        transport = transport_factory(room, lambda: runtime.current_shot)
+        if not isinstance(transport, GuidanceTransportAdapter):
+            raise TypeError("transport_factory must return GuidanceTransportAdapter")
+        transport_holder["value"] = transport
+        runtime.guidance_transport = transport
+        _attach_guidance_lifecycle(room, runtime)
     add_shutdown_callback = getattr(ctx, "add_shutdown_callback", None)
     if callable(add_shutdown_callback):
         async def shutdown_callback(*_args: Any) -> None:
-            await subscriber.stop()
+            await runtime.close()
 
         # JobContext currently registers this callback synchronously, while a
         # fake context may expose an async registration method.  Accommodate
         # both without making shutdown itself fire-and-forget.
         await _maybe_await(add_shutdown_callback(shutdown_callback))
     await subscriber.subscribe_existing_publications(room)
-    return AgentRuntime(room=room, subscriber=subscriber)
+    return runtime
 
 
 async def entrypoint(
@@ -836,6 +947,7 @@ async def entrypoint(
     on_result: Optional[ResultSink[Any, Any]] = None,
     on_error: Optional[ErrorSink] = None,
     stream_factory: Optional[Callable[[Any], Any]] = None,
+    transport_factory: GuidanceTransportFactory | None = None,
 ) -> AgentRuntime:
     """LiveKit Agents room entrypoint.
 
@@ -854,6 +966,7 @@ async def entrypoint(
         on_result=on_result,
         on_error=on_error,
         stream_factory=stream_factory,
+        transport_factory=transport_factory,
     )
     wait_for_shutdown = getattr(ctx, "wait_for_shutdown", None)
     if callable(wait_for_shutdown):
@@ -863,7 +976,7 @@ async def entrypoint(
             # Real JobContext uses its registered shutdown callbacks.  The
             # fallback also makes lightweight test contexts deterministic when
             # they only provide wait_for_shutdown and do not invoke callbacks.
-            await runtime.subscriber.stop()
+            await runtime.close()
     return runtime
 
 
@@ -872,6 +985,7 @@ def create_agent_server(
     inference: Optional[Inference[Any, Any]] = None,
     on_result: Optional[ResultSink[Any, Any]] = None,
     on_error: Optional[ErrorSink] = None,
+    transport_factory: GuidanceTransportFactory | None = None,
 ) -> Any:
     """Build an ``AgentServer`` when LiveKit Agents is installed.
 
@@ -897,6 +1011,7 @@ def create_agent_server(
             inference=inference,
             on_result=on_result,
             on_error=on_error,
+            transport_factory=transport_factory,
         )
 
     return server
@@ -938,6 +1053,7 @@ __all__ = [
     "CameraVideoTrackSubscriber",
     "FrameProcessor",
     "FrameSlotClosed",
+    "GuidanceTransportFactory",
     "LatestFrameProcessor",
     "LatestFrameQueue",
     "LatestFrameSlot",

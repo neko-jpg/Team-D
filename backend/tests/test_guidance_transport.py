@@ -34,6 +34,18 @@ class FailingPublisher(AsyncPublisher):
         raise RuntimeError("data channel unavailable")
 
 
+class FailOncePublisher(AsyncPublisher):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures_remaining = 1
+
+    async def publish_data(self, payload: bytes, *, reliable: bool) -> None:
+        if reliable and self.failures_remaining:
+            self.failures_remaining -= 1
+            raise RuntimeError("reliable data channel unavailable")
+        self.calls.append((json.loads(payload), reliable))
+
+
 class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_validated_inference_uses_fixed_copy_and_transport_classes(self) -> None:
         publisher = AsyncPublisher()
@@ -173,6 +185,70 @@ class GuidanceTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(adapter.connected)
         with self.assertRaises(GuidanceTransportError):
             await adapter.process_frame(b"next", shot="front")
+
+    async def test_set_shot_failure_fences_transport_until_reconnect_resync(self) -> None:
+        publisher = FailOncePublisher()
+
+        async def infer(_frame: object) -> object:
+            return {"code": "READY", "confidence": 1.0}
+
+        adapter = GuidanceTransportAdapter(
+            infer,
+            publisher,
+            state_machine=GuidanceStateMachine("transport", clock=lambda: 1_000),
+        )
+        with self.assertRaisesRegex(RuntimeError, "reliable"):
+            await adapter.set_shot("front")
+        self.assertEqual(adapter.current_shot, "front")
+        self.assertFalse(adapter.connected)
+        self.assertEqual(adapter.sequence, 1)
+
+        with self.assertRaises(GuidanceTransportError):
+            await adapter.process_frame(b"blocked", shot="front")
+        self.assertEqual(publisher.calls, [])
+
+        snapshot = await adapter.on_reconnected()
+        self.assertTrue(adapter.connected)
+        self.assertEqual((snapshot.sequence, snapshot.shot), (2, "front"))
+        event = await adapter.process_frame(b"new", shot="front")
+        assert event is not None
+        self.assertEqual(
+            [(payload.get("type", "guidance"), reliable, payload["sequence"])
+             for payload, reliable in publisher.calls],
+            [("resync", True, 2), ("guidance", False, 3)],
+        )
+
+    async def test_auto_shot_transition_failure_never_runs_inference_or_sends_advice(
+        self,
+    ) -> None:
+        publisher = FailOncePublisher()
+        inference_calls = 0
+
+        async def infer(_frame: object) -> object:
+            nonlocal inference_calls
+            inference_calls += 1
+            return {"code": "READY", "confidence": 1.0}
+
+        adapter = GuidanceTransportAdapter(
+            infer,
+            publisher,
+            state_machine=GuidanceStateMachine("transport", clock=lambda: 1_000),
+        )
+        with self.assertRaisesRegex(RuntimeError, "reliable"):
+            await adapter.process_frame(b"front", shot="front")
+        self.assertEqual(inference_calls, 0)
+        self.assertFalse(adapter.connected)
+        self.assertEqual(publisher.calls, [])
+
+        snapshot = await adapter.on_reconnected()
+        self.assertEqual((snapshot.sequence, snapshot.shot), (2, "front"))
+        event = await adapter.process_frame(b"front", shot="front")
+        assert event is not None
+        self.assertEqual(
+            [(payload.get("type", "guidance"), reliable, payload["sequence"])
+             for payload, reliable in publisher.calls],
+            [("resync", True, 2), ("guidance", False, 3)],
+        )
 
     def test_encoder_rejects_custom_copy_and_non_finite_values(self) -> None:
         with self.assertRaises(GuidanceTransportError):

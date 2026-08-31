@@ -9,6 +9,7 @@ dependencies = [
   "livekit-agents==1.7.1",
   "livekit-api==1.2.1",
   "openai==2.54.0",
+  "Pillow==11.3.0",
   "python-dotenv==1.2.3",
   "python-multipart==0.0.20",
   "uvicorn==0.35.0",

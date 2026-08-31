@@ -10,12 +10,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from backend.providers.garment_masker import (
-    GarmentMaskUnavailableError,
-    REMBG_MODEL,
-    REMBG_REMOVE_URL,
-    REMBG_TIMEOUT_SECONDS,
-)
+from backend.providers.garment_masker import GarmentMaskContractError, GarmentMaskUnavailableError
 from backend.rembg_prewarm import prewarm_rembg
 
 
@@ -25,6 +20,16 @@ FRONT_PNG = base64.b64decode(
 )
 MASK_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAAAAABX3VL4AAAADklEQVR4nGNg+M/wnwEABgAB/4/x/JoAAAAASUVORK5CYII="
+)
+NON_PNG_RESPONSE = b"this is not a PNG image"
+MISMATCHED_MASK_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNoAAAAggCBd81ytgAAAABJRU5ErkJggg=="
+)
+EMPTY_MASK_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAAAAABX3VL4AAAAC0lEQVR4nGNgAAEAAAYAAf6MZ8gAAAAASUVORK5CYII="
+)
+FULL_MASK_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAAAAABX3VL4AAAADklEQVR4nGP4/5/h/38AC/oD/eAlihAAAAAASUVORK5CYII="
 )
 
 
@@ -64,10 +69,40 @@ def test_prewarm_uses_production_rembg_request_and_returns_verified_mask() -> No
     assert (mask.width, mask.height, mask.mime_type) == (2, 2, "image/png")
     assert client.calls == [
         {
-            "url": REMBG_REMOVE_URL,
+            "url": "http://127.0.0.1:7000/api/remove",
             "files": {"file": ("front", original, "image/png")},
-            "data": {"model": REMBG_MODEL, "om": "true"},
-            "timeout": REMBG_TIMEOUT_SECONDS,
+            "data": {"model": "birefnet-general-lite", "om": "true"},
+            "timeout": 35.0,
+        }
+    ]
+
+
+@pytest.mark.skipif(importlib.util.find_spec("PIL") is None, reason="Pillow is not installed")
+@pytest.mark.parametrize(
+    ("invalid_mask", "message"),
+    [
+        (NON_PNG_RESPONSE, "decodable PNG"),
+        (MISMATCHED_MASK_PNG, "dimensions must match"),
+        (EMPTY_MASK_PNG, "empty mask"),
+        (FULL_MASK_PNG, "full-image mask"),
+    ],
+)
+def test_prewarm_rejects_invalid_sidecar_masks_without_mutating_or_falling_back(
+    invalid_mask: bytes, message: str
+) -> None:
+    original = bytes(FRONT_PNG)
+    client = RequestSpyClient(FakeResponse(invalid_mask))
+
+    with pytest.raises(GarmentMaskContractError, match=message):
+        asyncio.run(prewarm_rembg(original, "image/png", client=client))
+
+    assert original == FRONT_PNG
+    assert client.calls == [
+        {
+            "url": "http://127.0.0.1:7000/api/remove",
+            "files": {"file": ("front", original, "image/png")},
+            "data": {"model": "birefnet-general-lite", "om": "true"},
+            "timeout": 35.0,
         }
     ]
 
