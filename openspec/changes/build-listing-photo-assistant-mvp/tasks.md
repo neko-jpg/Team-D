@@ -38,15 +38,15 @@
 ## 3. 既存capture coreのLiveKit・4slot拡張
 
 - [ ] 3.1 【友ちゃんさん】LiveKit project、Room、browser participant、Python Agent用の環境変数と最小接続手順を用意し、同じRoomのparticipant一覧と両側ログでbrowserとAgentの一意なidentityを確認する
-- [ ] 3.2 【友ちゃんさん・健太さん】LiveKit Agents／Python SDKとLiveKit JS SDKの互換性があるstable versionをPython／npm lockfileへ固定し、clean installとSDK importを成功させ、製品名、version、URL、license／noticeを`THIRD_PARTY_NOTICES.md`の固定値と照合する
+- [x] 3.2 【友ちゃんさん・健太さん】LiveKit Agents／Python SDKとLiveKit JS SDKの互換性があるstable versionをPython／npm lockfileへ固定し、clean installとSDK importを成功させ、製品名、version、URL、license／noticeを`THIRD_PARTY_NOTICES.md`の固定値と照合する
 - [ ] 3.3 【友ちゃんさん・健太さん】完了済みNode.js API scaffoldの`/api/health`契約を保ったまま、FastAPI serverとLiveKit Agent workerがprovider schemaと設定を共有するPython packageへbackendを移行し、ルートからfixture／liveを起動してfrontend build、Python import、health response、Agent起動ログを確認する
-- [ ] 3.4 【友ちゃんさん】既存のfront／back／tag契約を、`GuidanceEvent`、measurementを含む4slot、正規化4端点、`MeasurementDraft`／`ApprovedMeasurement`、接続状態、provider errorへ後方互換に拡張し、未知値、欠落、非有限値、範囲外座標、measurementを含む`ShotAssessment`を拒否する契約テストを通す
+- [x] 3.4 【友ちゃんさん】既存のfront／back／tag契約を、`GuidanceEvent`、measurementを含む4slot、正規化4端点、`MeasurementDraft`／`ApprovedMeasurement`、接続状態、provider errorへ後方互換に拡張し、未知値、欠落、非有限値、範囲外座標、measurementを含む`ShotAssessment`を拒否する契約テストを通す
 - [ ] 3.5 【徹平さん】既存`CaptureReducer`を、工程、撮影phase、接続状態を分離した`front→back→tag→measurement準備→measurement撮影→採寸確認・承認→edit`へ拡張し、受理済み4slotと`approved_cv|approved_manual`からだけ次stepを導出して、撮り直し、再接続、不正なAI `nextAction`、古い`requestId`で別slotや採寸状態が変わらないReducerテストを通す
 - [ ] 3.6 【徹平さん・健太さん】既存upload fixture縦スライスを`1/4 正面→2/4 背面→3/4 タグ→4/4 採寸`へ拡張し、4枚の保持後も採寸が`needs_review`なら編集開始を無効にし、測定線と数値の明示承認後だけeditへ進むUI統合テストを通す
-- [ ] 3.7 【友ちゃんさん】`POST /api/livekit-token`で、設定上限内の短い有効期限、sessionに対応するRoom、一意なparticipant identity、camera publishと必要なdata通信だけを許可するtokenを発行し、decodeしたclaimと、LiveKit API secretがresponse／browser bundleへ含まれないことをテストする
+- [x] 3.7 【友ちゃんさん】`POST /api/livekit-token`で、設定上限内の短い有効期限、sessionに対応するRoom、一意なparticipant identity、camera publishと必要なdata通信だけを許可するtokenを発行し、decodeしたclaimと、LiveKit API secretがresponse／browser bundleへ含まれないことをテストする
 - [ ] 3.8 【徹平さん・健太さん】LiveKit JS SDKでRoomへ接続し、2.2で実装する背面camera trackをpublishして、工程と独立した`connecting|connected|reconnecting|disconnected`をUIへ反映し、基準iPhoneのparticipant一覧とtrack情報で接続を確認する
-- [ ] 3.9 【友ちゃんさん】Python LiveKit AgentをRoom participantとして起動し、camera video trackへsubscribeして、frame arrivalごとに上書きするcapacity 1のlatest-frame slotと同時推論1件のprocessorを実装し、推論中に3frame以上を流してもqueueが1を超えず、完了後は最新frameだけが処理されるテストを通す
-- [ ] 3.10 【友ちゃんさん】現在shotと縮小frameを受ける`VisionGuidanceProvider`と`GuidanceStateMachine`を実装し、有限codeへのruntime validation、session単位の単調増加sequence、`observedAt`／`expiresAt`、同一shot／codeのdedupe、短命助言と再同期のtransport区分を契約テストで確認する
+- [x] 3.9 【友ちゃんさん】Python LiveKit AgentをRoom participantとして起動し、camera video trackへsubscribeして、frame arrivalごとに上書きするcapacity 1のlatest-frame slotと同時推論1件のprocessorを実装し、推論中に3frame以上を流してもqueueが1を超えず、完了後は最新frameだけが処理されるテストを通す
+- [x] 3.10 【友ちゃんさん】現在shotと縮小frameを受ける`VisionGuidanceProvider`と`GuidanceStateMachine`を実装し、有限codeへのruntime validation、session単位の単調増加sequence、`observedAt`／`expiresAt`、同一shot／codeのdedupe、短命助言と再同期のtransport区分を契約テストで確認する
 - [ ] 3.11 【徹平さん】LiveKit data eventを購読し、session／shot不一致、既読以下のsequence、期限切れeventを破棄したうえで、Agentと端末内の候補から工程不成立→欠け→構図→角度／しわ→品質→安定性の優先順で主指示を1件だけ選ぶselectorを実装し、時間ベースのenter／clear hysteresis、解消時の短い肯定、`READY`安定化をfake clockでテストする
 - [ ] 3.12 【健太さん】2.10の固定ガイドと手動シャッターを、全画面camera、固定された進捗・戻る・help・light・shutter、アプリ所有の短い日本語案内へ拡張し、confidence／診断語を表示せず、助言変更で操作位置が動かず、`READY`以外でもraw Blobを撮影できることをcomponent／画像fixtureで確認する
 - [ ] 3.13 【健太さん】権限待ち、各主指示、解消の肯定、ready、撮影中、検証中、撮り直し、再接続、offline、4slot進捗を決定的なStorybook fixtureで再現し、390×844、375×812、430×932、200%文字拡大、safe area、44px操作領域、`aria-live`抑制、reduced motion、visible focusをvisual／accessibility testで確認する

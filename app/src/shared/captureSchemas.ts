@@ -6,8 +6,10 @@ import {
   NEXT_ACTIONS,
   PROVIDER_ERROR_CODES,
   PROVIDER_NAMES,
+  SESSION_SLOTS,
   SHOT_ISSUE_CODES,
   SHOT_QUALITIES,
+  SHOT_SLOTS,
   SHOT_TYPES,
   type CaptureSlotRecord,
   type CaptureSlotState,
@@ -17,7 +19,10 @@ import {
 } from "./captureTypes";
 
 export const CaptureSlotSchema = z.enum(CAPTURE_SLOTS);
-export const ShotSlotSchema = CaptureSlotSchema;
+export const ShotSlotSchema = z.enum(SHOT_SLOTS);
+
+/** Accepts the four required session photos, including `measurement`. */
+export const SessionSlotSchema = z.enum(SESSION_SLOTS);
 export const ShotTypeSchema = z.enum(SHOT_TYPES);
 export const LiveHintSchema = z.enum(LIVE_HINTS);
 export const ShotIssueCodeSchema = z.enum(SHOT_ISSUE_CODES);
@@ -29,7 +34,7 @@ export const ShotAssessmentSchema: z.ZodType<ShotAssessment> = z
     shotType: ShotTypeSchema,
     quality: ShotQualitySchema,
     issues: z.array(ShotIssueCodeSchema),
-    missingShots: z.array(CaptureSlotSchema),
+    missingShots: z.array(ShotSlotSchema),
     nextAction: NextActionSchema,
   })
   .strict();
