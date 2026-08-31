@@ -123,7 +123,7 @@ class ShotAssessorContractTests(unittest.IsolatedAsyncioTestCase):
                     "object": "response",
                     "created_at": 0,
                     "status": "completed",
-                    "model": "gpt-4.1-mini-2025-04-14",
+                    "model": "gpt-5.6-luna",
                     "output": [
                         {
                             "id": "msg_contract_test",
@@ -152,7 +152,7 @@ class ShotAssessorContractTests(unittest.IsolatedAsyncioTestCase):
         )
         try:
             result = await ResponsesShotAssessor(
-                client.responses, "gpt-4.1-mini-2025-04-14"
+                client.responses, "gpt-5.6-luna"
             ).assess(
                 ShotAssessorInput(AssessmentImage(b"image", "image/jpeg"), "front")  # type: ignore[arg-type]
             )

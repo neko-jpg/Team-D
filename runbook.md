@@ -157,7 +157,7 @@ live preflightの前に、gitignoredの`.env.local`へserver-onlyの資格情報
 
 ```dotenv
 OPENAI_API_KEY=...
-SHOT_ASSESSOR_MODEL=gpt-4.1-mini-2025-04-14
+SHOT_ASSESSOR_MODEL=gpt-5.6-luna
 ```
 
 ### fixture へ明示的に切り替える
