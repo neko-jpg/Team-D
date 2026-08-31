@@ -22,10 +22,24 @@ BACKGROUND_GENERATION_TIMEOUT_SECONDS = 60.0
 MAX_GENERATED_BACKGROUND_BYTES = 20 * 1024 * 1024
 MAX_GENERATED_BACKGROUND_PIXELS = 4096 * 4096
 
+_GPT_IMAGE_MODELS = frozenset(
+    {
+        "gpt-image-1",
+        "gpt-image-1-mini",
+        "gpt-image-1.5",
+        "gpt-image-2",
+        "gpt-image-2-2026-04-21",
+        "chatgpt-image-latest",
+    }
+)
+_DALL_E_MODELS = frozenset({"dall-e-2", "dall-e-3"})
+_SUPPORTED_IMAGE_MODELS = _GPT_IMAGE_MODELS | _DALL_E_MODELS
+
 _PROMPT_SUFFIX = (
     "The image must show only an empty photography background from a direct "
     "overhead, top-down viewpoint with soft, even lighting. It must contain "
-    "no person, clothing, garment, hanger, text, or logo."
+    "no product, no person, no clothing, no garment, no hanger, no text, "
+    "no logo, and no watermark."
 )
 
 ALLOWED_BACKGROUND_STYLE_PROMPTS: Mapping[str, str] = MappingProxyType(
@@ -112,19 +126,20 @@ class BackgroundGenerator:
             )
         if not isinstance(model, str) or not model.strip():
             raise BackgroundGenerationContractError("model must be a non-empty string")
+        normalized_model = model.strip()
+        if not _is_supported_image_model(normalized_model):
+            raise BackgroundGenerationContractError(
+                f"unsupported background generation model: {normalized_model}"
+            )
         self._client = client
-        self._model = model.strip()
+        self._model = normalized_model
 
     async def generate(self, style_id: str) -> GeneratedBackground:
         prompt = _prompt_for_style(style_id)
+        request = _generation_request(self._model, prompt)
         try:
             response = await asyncio.wait_for(
-                self._client.generate(
-                    model=self._model,
-                    prompt=prompt,
-                    n=1,
-                    response_format="b64_json",
-                ),
+                self._client.generate(**request),
                 timeout=BACKGROUND_GENERATION_TIMEOUT_SECONDS,
             )
         except (asyncio.TimeoutError, TimeoutError) as exc:
@@ -134,12 +149,16 @@ class BackgroundGenerator:
         except BackgroundGenerationProviderError:
             raise
         except Exception as exc:
+            if _is_openai_timeout(exc):
+                raise BackgroundGenerationTimeoutError(
+                    "background generation exceeded the 60 second timeout"
+                ) from exc
             raise BackgroundGenerationProviderError(
                 "background generation provider request failed"
             ) from exc
 
         encoded = _extract_single_base64_image(response)
-        return _decode_generated_background(encoded)
+        return await asyncio.to_thread(_decode_generated_background, encoded)
 
 
 class FixtureBackgroundGenerator:
@@ -164,6 +183,30 @@ def _prompt_for_style(style_id: str) -> str:
         ) from exc
 
 
+def _is_supported_image_model(model: str) -> bool:
+    return model in _SUPPORTED_IMAGE_MODELS
+
+
+def _generation_request(model: str, prompt: str) -> dict[str, object]:
+    """Build a model-compatible request that always yields base64 PNG data."""
+
+    request: dict[str, object] = {
+        "model": model,
+        "prompt": prompt,
+        "n": 1,
+        "timeout": BACKGROUND_GENERATION_TIMEOUT_SECONDS,
+    }
+    if model in _DALL_E_MODELS:
+        # DALL-E supports response_format but not output_format. Its b64 payload is
+        # PNG, which is still verified after decoding.
+        request["response_format"] = "b64_json"
+    else:
+        # GPT Image always returns base64 and supports selecting PNG output. It
+        # rejects the DALL-E-only response_format field.
+        request["output_format"] = "png"
+    return request
+
+
 def _extract_single_base64_image(response: object) -> str:
     data = _field(response, "data")
     if (
@@ -186,6 +229,16 @@ def _field(value: object, name: str) -> Any:
     if isinstance(value, Mapping):
         return value.get(name)
     return getattr(value, name, None)
+
+
+def _is_openai_timeout(error: Exception) -> bool:
+    """Recognize the official SDK timeout without importing it at startup."""
+
+    try:
+        from openai import APITimeoutError
+    except ImportError:  # pragma: no cover - OpenAI is a declared live dependency
+        return False
+    return isinstance(error, APITimeoutError)
 
 
 def _decode_generated_background(encoded: str) -> GeneratedBackground:
