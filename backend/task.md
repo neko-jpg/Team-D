@@ -94,7 +94,16 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 - [x] 7.5 【ともちゃん】実rembg `birefnet-general-lite`へclean sourceから作った20件を送り、provider error 0件、mean／minimum IoU 0.988096／0.964637、mean／minimum precision 0.991359／0.966008、mean／minimum recall 0.996700／0.990157を確認する。RGBA previewは20/20件で透明・不透明画素を含み、alphaがmaskと一致し、不透明商品画素の元RGBを保持する。ウォーム後の処理時間はp50 4.656秒／p95 4.756秒であり、ライブ助言の1秒経路とは分離した撮影後処理とする。評価器は16件未満、p50 IoU 0.85未満、または1件でもIoU／precision／recall 0.90未満なら失敗にする。
 - [x] 7.6 【健太】上位`gpt-realtime-2`は同じ80件でp95 2.310秒、provider error 39件となり1秒要件を満たさないため採用しない。複数fieldを一度に返す条件分解方式もp95 903.304ms、provider error 7件、誤`READY` 2件へ悪化したため採用せず、検証済みの有限code方式をproduction defaultとして維持する。
 
-非READY構図4分類のexact一致は20件中5件（25%）であり、`MOVE_FARTHER`は0/5だった。公開画像の切り抜きには表裏・平置き・折れの正解がなく、`READY`正例も人手確認していないため、プロダクト全体の助言精度または`READY`再現率とはみなさない。現時点で確認できたのは、有限code契約、危険な誤`READY`抑止、成功runでの1秒以内判定、同一結果の非再描画、lossy欠落からのheartbeat復元、およびclean商品単体20件での透過品質である。front／back／tagの撮影助言精度と撮影後受理精度を完了判定するには、実際の撮影手順で正解を付けた12〜30枚以上を別途用意する。構図codeの精度改善候補としてApache-2.0のRepViT-SAMでmask／bboxを100ms未満に求め、構図NGを決定論的に返す方式を調査したが、backend実行環境と実衣類p95が未確定なためこの変更では本採用していない。
+OpenAI単独だった初回評価では、非READY構図4分類のexact一致は20件中5件（25%）、`MOVE_FARTHER`は0/5だった。この失敗を受け、構図をOpenAIの意味推論から分離して、prewarm済み`u2netp`のmask／bboxを決定論的に分類するハイブリッド方式へ変更した。公開画像の切り抜きには表裏・平置き・折れの正解がなく、`READY`正例も人手確認していないため、ハイブリッド後の20/20もプロダクト全体の助言精度または`READY`再現率とはみなさない。front／back／tagの撮影助言精度と撮影後受理精度を完了判定するには、実際の撮影手順で正解を付けた12〜30枚以上を別途用意する。RepViT-SAMもApple M3のCoreMLで20件を計測してp95 238.6msだったが、動的decoderのexport互換性とLinux portabilityを優先し、このbackendですでに運用するrembg／ONNXの`u2netp`を採用した。
+
+## 8. ローカル構図判定とRealtime意味判定のハイブリッド
+
+- [x] 8.1 【ともちゃん】最大連結成分のmask／bboxから画像端1px接触、span 0.42未満、span 0.77超、中心軸ずれ0.12超の優先順で4構図codeまたはPASSだけを返す`GeometryGuidanceProvider`を`backend/**`へ実装する。ローカル判定から`READY`を返さず、空／全面／寸法不一致maskを契約違反として拒否する。
+- [x] 8.2 【ともちゃん】既存rembg v2.0.81 sidecarのprewarm済み`u2netp`をライブ構図mask専用に接続し、model名固定、450ms以下timeout、PNG／寸法検証を行う。`front|back`だけで使用し、撮影後の`birefnet-general-lite`経路とtimeoutを分離する。
+- [x] 8.3 【ともちゃん】同じ最新frameからgeometryとOpenAI Realtime semanticを並列開始し、geometry補正を優先、PASS時だけsemanticを採用するhybrid analyzerを実装する。geometry失敗またはPASS時のsemantic失敗は成功結果へfallbackせず、既存transportで`AGENT_UNAVAILABLE`へ正規化する。tag／measurementは既存semantic経路を維持する。
+- [x] 8.4 【健太】20件の公開衣類構図fixtureを本番と同じrembg HTTPへ通し、各code 5/5、全体20/20、誤`READY` 0件、provider error 0件、ウォームp95 400ms未満をbackend-only gateで確認する。hybrid実credential反復ではgeometry／semantic／合成／publishを分離計測し、成功20件以上、error 0件、全体p95 1秒未満を確認する。
+
+構図ゲートは4反復すべて20/20、各code 5/5、誤`READY` 0件、provider error 0件で、ウォームp95は181.300〜241.293ms、最大値は369.766msだった。`.env.local`の実`OPENAI_API_KEY`と本番runtime factoryを使った20件のhybrid transport計測はprovider error 0件、`observedAt→provider完了` p95 633.596ms、backend publish p95 0.244ms、`observedAt→backend publish` p95 633.789msで合格した。別の構図補正20件はp95 199.913ms、意味判定が必要なPASS 20件はp95 522.873msで、1本のprewarm済みRealtime接続が再利用された。
 
 ## 完了条件
 

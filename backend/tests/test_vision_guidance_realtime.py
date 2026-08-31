@@ -223,6 +223,21 @@ async def test_single_image_model_cannot_emit_backend_or_temporal_states() -> No
         await analyzer.aclose()
 
 
+@async_test
+async def test_semantic_only_front_rejects_a_geometry_code() -> None:
+    analyzer = OpenAIRealtimeVisionGuidanceAnalyzer(
+        FakeClient(["MOVE_FARTHER"]),
+        "test-realtime",
+        prewarm=False,
+        semantic_only_geometry=True,
+    )
+
+    with pytest.raises(GuidanceContractError, match="not valid semantic model guidance"):
+        await analyzer(guidance())
+
+    await analyzer.aclose()
+
+
 def test_request_uses_positive_ready_criteria_and_model_only_allowlist() -> None:
     analyzer = OpenAIRealtimeVisionGuidanceAnalyzer(
         FakeClient(),
@@ -246,6 +261,38 @@ def test_request_uses_positive_ready_criteria_and_model_only_allowlist() -> None
     assert "prev=" not in instructions
     assert "HOLD_STEADY" not in enum
     assert "AGENT_UNAVAILABLE" not in enum
+
+
+def test_semantic_only_front_request_excludes_geometry_codes_and_guide() -> None:
+    analyzer = OpenAIRealtimeVisionGuidanceAnalyzer(
+        FakeClient(),
+        "test-realtime",
+        prewarm=False,
+        semantic_only_geometry=True,
+    )
+    input_value = GuidanceInput(
+        frame=EncodedImage(png(), "image/png", 800, 600),
+        requested_shot=GuidanceShot.FRONT,
+    )
+
+    request = analyzer.request_for(input_value, request_id="semantic-1")
+    instructions = request["instructions"]
+    enum = request["tools"][0]["parameters"]["properties"]["code"]["enum"]  # type: ignore[index]
+    camera_image = request["input"][0]["content"][0]  # type: ignore[index]
+    _header, encoded = camera_image["image_url"].split(",", 1)  # type: ignore[index,union-attr]
+
+    assert "Do not judge geometry" in instructions
+    assert set(enum) == {"FLATTEN_GARMENT", "READY", "WRONG_SIDE"}
+    with Image.open(BytesIO(base64.b64decode(encoded))) as prepared:
+        guide_pixel = prepared.convert("RGB").getpixel(
+            (round(prepared.width * 0.15), round(prepared.height * 0.15))
+        )
+        assert not (
+            guide_pixel[1] > 180
+            and guide_pixel[2] > 180
+            and guide_pixel[1] - guide_pixel[0] > 50
+            and guide_pixel[2] - guide_pixel[0] > 50
+        )
 
 
 def test_measurement_request_matches_overlay_and_model_only_rules() -> None:

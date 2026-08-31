@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw, ImageOps
 
 from .vision_guidance import (
     MODEL_GUIDANCE_CODES_BY_SHOT,
+    SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT,
     EncodedImage,
     GuidanceCode,
     GuidanceContractError,
@@ -30,6 +31,7 @@ from .vision_guidance import (
     VisionDecision,
     validate_guidance_input,
     validate_model_vision_decision_for_shot,
+    validate_semantic_model_vision_decision_for_shot,
 )
 
 
@@ -90,13 +92,33 @@ def _bounded_integer(value: object, field: str, minimum: int, maximum: int) -> i
     return value
 
 
-def _allowed_codes(shot: GuidanceShot) -> tuple[str, ...]:
-    return tuple(sorted(code.value for code in MODEL_GUIDANCE_CODES_BY_SHOT[shot]))
+def _allowed_codes(
+    shot: GuidanceShot, *, semantic_only_geometry: bool = False
+) -> tuple[str, ...]:
+    source = (
+        SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT
+        if semantic_only_geometry
+        else MODEL_GUIDANCE_CODES_BY_SHOT
+    )
+    return tuple(sorted(code.value for code in source[shot]))
 
 
-def _instruction_for(shot: GuidanceShot) -> str:
-    allowed = "|".join(_allowed_codes(shot))
-    if shot in {GuidanceShot.FRONT, GuidanceShot.BACK}:
+def _instruction_for(
+    shot: GuidanceShot, *, semantic_only_geometry: bool = False
+) -> str:
+    allowed = "|".join(
+        _allowed_codes(shot, semantic_only_geometry=semantic_only_geometry)
+    )
+    if semantic_only_geometry and shot in {GuidanceShot.FRONT, GuidanceShot.BACK}:
+        criteria = (
+            "A local mask classifier has already confirmed framing, distance, and "
+            "centering. Do not judge geometry. Inspect one flat-laid garment and "
+            "choose the first matching rule: visible side does not match shot="
+            "WRONG_SIDE; materially folded or wrinkled=FLATTEN_GARMENT; READY only "
+            "when one garment is positively confirmed to show the expected side "
+            "and is sufficiently flat. Never choose READY when unsure"
+        )
+    elif shot in {GuidanceShot.FRONT, GuidanceShot.BACK}:
         criteria = (
             "The cyan rectangle and cross are synthetic framing guides, not part of "
             "the garment. Inspect one flat-laid garment and choose the first matching "
@@ -138,7 +160,9 @@ def _instruction_for(shot: GuidanceShot) -> str:
     )
 
 
-def _guidance_tool(shot: GuidanceShot) -> dict[str, object]:
+def _guidance_tool(
+    shot: GuidanceShot, *, semantic_only_geometry: bool = False
+) -> dict[str, object]:
     return {
         "type": "function",
         "name": "guidance",
@@ -148,7 +172,15 @@ def _guidance_tool(shot: GuidanceShot) -> dict[str, object]:
             "additionalProperties": False,
             "required": ["code"],
             "properties": {
-                "code": {"type": "string", "enum": list(_allowed_codes(shot))}
+                "code": {
+                    "type": "string",
+                    "enum": list(
+                        _allowed_codes(
+                            shot,
+                            semantic_only_geometry=semantic_only_geometry,
+                        )
+                    ),
+                }
             },
         },
     }
@@ -160,6 +192,7 @@ def _prepare_image(
     shot: GuidanceShot,
     max_edge: int,
     jpeg_quality: int,
+    include_geometry_guide: bool = True,
 ) -> tuple[str, bytes, int, int]:
     if frame.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
         raise GuidanceContractError("Realtime guidance frame must be JPEG, PNG, or WebP")
@@ -167,7 +200,7 @@ def _prepare_image(
         with Image.open(BytesIO(frame.data)) as source:
             image = ImageOps.exif_transpose(source).convert("RGB")
             image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
-            if shot in {
+            if include_geometry_guide and shot in {
                 GuidanceShot.FRONT,
                 GuidanceShot.BACK,
                 GuidanceShot.MEASUREMENT,
@@ -229,6 +262,7 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
         reasoning_effort: str | None = None,
         prewarm: bool = True,
         confidence: float = 1.0,
+        semantic_only_geometry: bool = False,
     ) -> None:
         if not isinstance(client, RealtimeClient):
             raise GuidanceContractError("client must provide realtime.connect and async close")
@@ -238,6 +272,8 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
             raise GuidanceContractError("reasoning_effort is invalid")
         if not isinstance(prewarm, bool):
             raise GuidanceContractError("prewarm must be a boolean")
+        if not isinstance(semantic_only_geometry, bool):
+            raise GuidanceContractError("semantic_only_geometry must be a boolean")
         if (
             isinstance(confidence, bool)
             or not isinstance(confidence, (int, float))
@@ -269,6 +305,7 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
         self._reasoning_effort = reasoning_effort
         self._prewarm_enabled = prewarm
         self._confidence = float(confidence)
+        self._semantic_only_geometry = semantic_only_geometry
         self._connection: Any | None = None
         self._connection_manager: Any | None = None
         self._lock = asyncio.Lock()
@@ -320,6 +357,7 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
             reasoning_effort=self._reasoning_effort,
             prewarm=self._prewarm_enabled,
             confidence=self._confidence,
+            semantic_only_geometry=self._semantic_only_geometry,
         )
 
     def request_for(
@@ -335,15 +373,28 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
             shot=validated.requested_shot,
             max_edge=self._image_max_edge,
             jpeg_quality=self._jpeg_quality,
+            include_geometry_guide=not (
+                self._semantic_only_geometry
+                and validated.requested_shot
+                in {GuidanceShot.FRONT, GuidanceShot.BACK}
+            ),
         )
         response: dict[str, object] = {
             "conversation": "none",
             "metadata": {"request_id": request_id},
             "output_modalities": ["text"],
             "instructions": instructions
-            or _instruction_for(validated.requested_shot),
+            or _instruction_for(
+                validated.requested_shot,
+                semantic_only_geometry=self._semantic_only_geometry,
+            ),
             "max_output_tokens": self._max_output_tokens,
-            "tools": [_guidance_tool(validated.requested_shot)],
+            "tools": [
+                _guidance_tool(
+                    validated.requested_shot,
+                    semantic_only_geometry=self._semantic_only_geometry,
+                )
+            ],
             "tool_choice": {"type": "function", "name": "guidance"},
             "input": [
                 {
@@ -541,7 +592,12 @@ class OpenAIRealtimeVisionGuidanceAnalyzer:
                     "Realtime guidance tool output must contain only code"
                 )
             code = payload["code"]
-        return validate_model_vision_decision_for_shot(
+        validator = (
+            validate_semantic_model_vision_decision_for_shot
+            if self._semantic_only_geometry
+            else validate_model_vision_decision_for_shot
+        )
+        return validator(
             {"code": code, "confidence": self._confidence},
             validated.requested_shot,
         )

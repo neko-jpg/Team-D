@@ -5,7 +5,7 @@
 ## What Changes
 
 - モバイルカメラ上へ正面・背面・タグごとの固定2Dガイドと進捗を表示する。
-- カメラ映像をLiveKit RoomへWebRTC publishし、stateful AgentがOpenAI Realtimeとの単一の常時WebSocket接続へ最新の縮小frameだけを連続投入して、構図・距離・表裏・タグ移動の有限な撮影助言をfrontendへpushする。
+- カメラ映像をLiveKit RoomへWebRTC publishし、stateful Agentが最新の縮小frameを、rembg `u2netp`によるローカル構図判定とOpenAI Realtimeの意味判定へ渡す。構図・距離はmask／bboxから決定論的に判定し、表裏・しわ・タグ移動は単一の常時WebSocketで判定して、有限な撮影助言をfrontendへpushする。
 - 端末内では明るさ、ブレ、映像の安定性を補助判定し、Agent切断時も固定ガイドと手動撮影を維持する。
 - 手動撮影後は高解像度画像をstrictな構造化AI判定へ送り、撮り直し、次撮影、完了を確定する。
 - `1/4 正面 → 2/4 背面 → 3/4 タグ → 4/4 採寸`の固定順序で4枚を撮り、受け入れ済み画像を保持して撮影ループを続ける。
@@ -14,7 +14,7 @@
 - 必須写真と採寸結果が揃うまで背景編集および最終出力へ進めない。
 - 商品を含まない背景だけを生成し、正面原本から得た商品RGBとrembg maskをCanvas合成する。
 - 元画像と合成画像を比較し、利用者が明示的に承認した正面画像だけを出力する。
-- LiveKit Agentsをライブ映像transport・Agent lifecycle・frontend pushの中核とし、Wardrobeは設計参考、document-autocaptureは関数の限定移植、OpenCV.jsは採寸画像処理、rembg／BiRefNetは背景分離の実行時依存とする。
+- LiveKit Agentsをライブ映像transport・Agent lifecycle・frontend pushの中核とし、Wardrobeは設計参考、document-autocaptureは関数の限定移植、OpenCV.jsは採寸画像処理、rembg／`u2netp`はライブ構図判定、rembg／BiRefNetは撮影後の背景分離に限定する。
 - 真の空間AR、自動撮影、マーカーなしの完全自動採寸、商品再生成、人物着用生成は対象外とする。
 
 ## Capabilities
@@ -31,8 +31,8 @@
 ## Impact
 
 - React／TypeScript／Vite: カメラ、固定ガイド、LiveKit Room接続とvideo publish、Agentイベント購読、端末内品質解析、撮影状態、採寸点の修正・承認、比較・承認UI。
-- Python backend／LiveKit Agent: 短命token発行、camera track購読、OpenAI Realtime sessionのprewarmと再利用、最新フレーム優先の意味判定、有限な`GuidanceEvent`のdata packet／RPC push、撮影後判定、採寸4端点提案、背景生成、rembg接続。
+- Python backend／LiveKit Agent: 短命token発行、camera track購読、`u2netp` maskからの決定論的な構図判定、OpenAI Realtime sessionのprewarmと再利用、両判定の安全な合成、有限な`GuidanceEvent`のdata packet／RPC push、撮影後判定、採寸4端点提案、背景生成、rembg接続。
 - OpenCV.js: 50mm専用マーカー検出、射影補正、縮尺計算、画像上の測定点からcmへの換算。
-- Python sidecar: rembg v2.0.81と`birefnet-general-lite`。
+- Python sidecar: rembg v2.0.81、ライブ構図用`u2netp`、撮影後背景分離用`birefnet-general-lite`。
 - 外部OSSの採用境界、固定commit、ライセンス対応はルートの`architecture.md`を参照する。
 - 画像はセッション内だけで扱い、資格情報とrembgポートをブラウザへ公開しない。

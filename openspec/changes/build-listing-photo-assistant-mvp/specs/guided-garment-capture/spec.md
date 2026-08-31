@@ -25,7 +25,7 @@
 
 ### Requirement: カメラ上へ固定ガイドとリアルタイム助言を表示する
 
-システム SHALL、カメラ開始後から終了まで、現在の撮影種別に対応する固定2Dガイドを表示し、LiveKitの持続的なリアルタイム映像セッションとbackendからOpenAI Realtimeへの単一の常時WebSocket接続を通じて、AIが判定した構図、距離、衣類の収まり、表裏、タグまたは採寸準備への移動に関する主助言をカメラ上へ表示する。`measurement`では衣類全体の安全枠と右下の50mm専用マーカー配置枠を表示する。明るさ、ブレ、安定性は端末内でも補助判定する。
+システム SHALL、カメラ開始後から終了まで、現在の撮影種別に対応する固定2Dガイドを表示する。LiveKitの持続的なリアルタイム映像セッションで受けた最新frameについて、`front|back`の構図、距離、衣類の収まりはローカルsegmenterのmask／bboxから決定論的に判定し、表裏、しわ、タグまたは採寸準備への移動はbackendからOpenAI Realtimeへの単一の常時WebSocket接続で意味判定して、優先度が最も高い主助言をカメラ上へ表示する。ローカル構図判定だけで`READY`を返してはならない。`measurement`では衣類全体の安全枠と右下の50mm専用マーカー配置枠を表示する。明るさ、ブレ、安定性は端末内でも補助判定する。
 
 #### Scenario: 撮影に適した状態になる
 
@@ -42,20 +42,30 @@
 - **WHEN** 連続フレーム差分が移動閾値を超える
 - **THEN** システムは`HOLD_STEADY`を表示し、安定継続時間をリセットする
 
-#### Scenario: 衣類全体がガイドから欠ける
+#### Scenario: 衣類全体が画面端で欠ける
 
-- **WHEN** ライブAIが現在shotの衣類全体が映像内に収まっていないと判定する
+- **WHEN** `front|back`のローカルmask最大連結成分が実画像の端から1px以内へ接触する
 - **THEN** システムは`SHOW_FULL_GARMENT`と端末を離す具体的な案内を撮影前に表示する
+
+#### Scenario: ローカル構図を決定論的に判定する
+
+- **WHEN** `front|back`の有効な衣類maskから、最大辺span、中心座標、画像端接触を計算する
+- **THEN** Agentは画像端接触、`span < 0.42`、`span > 0.77`、中心軸ずれ`> 0.12`の優先順で`SHOW_FULL_GARMENT|MOVE_CLOSER|MOVE_FARTHER|CENTER_GARMENT`を返し、いずれにも該当しない場合だけ意味判定結果へ委譲する
+
+#### Scenario: ローカル構図解析が失敗する
+
+- **WHEN** segmenterがtimeout、無効mask、空mask、全面mask、またはprovider errorになる
+- **THEN** Agentは意味判定AIの`READY`へfallbackせず、有限な`AGENT_UNAVAILABLE`として扱う
 
 #### Scenario: 撮影対象の表裏が異なる
 
 - **WHEN** 現在shotが`back`で、ライブAIが正面を向いていると判定する
 - **THEN** システムは`WRONG_SIDE`と衣類を裏返す案内を撮影前に表示する
 
-#### Scenario: カメラ映像の意味判定を継続する
+#### Scenario: カメラ映像の構図判定と意味判定を継続する
 
 - **WHEN** LiveKitのcamera trackとOpenAI Realtime sessionが接続済みで、現在shotのframeが継続して到着する
-- **THEN** AgentはHTTP pollingやframeごとの接続作成を行わず、最大辺320px以下へ縮小した最新frame 1枚だけを同じRealtime sessionの独立した判定へ投入し、過去の判定履歴を次の判定入力へ蓄積しない
+- **THEN** AgentはHTTP pollingやframeごとの接続作成を行わず、最大辺320px以下へ縮小した最新frame 1枚だけを、prewarm済みのローカルsegmenterと同じRealtime sessionの独立した意味判定へ投入し、構図補正を意味判定より優先し、過去の判定履歴を次の判定入力へ蓄積しない
 
 ### Requirement: ライブ助言はサーバーからpushされる
 
@@ -88,7 +98,7 @@
 
 ### Requirement: ライブ解析は有限の性能上限を使う
 
-システム SHALL、端末内品質解析では固定ROIを最大辺320px以下へ縮小し、基準端末で4Hz以上、同時解析数1、状態変化からUI反映までp95 500ms以内を目標とする。AI意味判定では同時解析数を1、待機中の最新frameを1に制限し、観測からbackend publishまでfixture p95 1秒以内を必須とする。live providerは事前接続済みの同一OpenAI Realtime sessionを使い、実credential、成功20件以上、provider error 0件の計測で`observedAt`からbackend publishまでp95 1秒未満を必須とする。Realtime接続確立時間はcold-startとして別に記録し、最初の解析対象frameを受ける前にprewarmを完了する。provider responseのdeadlineを950ms以下に設定し、backend内のprovider完了からpublishまでをp95 50ms未満にする。backendは各区間を分解して計測可能にし、解析中の中間frameを無制限に蓄積してはならない。
+システム SHALL、端末内品質解析では固定ROIを最大辺320px以下へ縮小し、基準端末で4Hz以上、同時解析数1、状態変化からUI反映までp95 500ms以内を目標とする。Agent側はローカル構図判定とAI意味判定を同じ最新frameから並列に開始し、処理全体の同時解析数を1、待機中の最新frameを1に制限する。ローカル構図providerはprewarm済み`u2netp`を使い、450msでtimeoutし、実mask HTTPを含む20件以上の計測でprovider error 0件、p95 400ms未満、4構図の厳密一致率100%、誤`READY` 0件を必須とする。live意味判定は事前接続済みの同一OpenAI Realtime sessionを使い、実credential、成功20件以上、provider error 0件の計測で`observedAt`からbackend publishまでp95 1秒未満を必須とする。Realtime接続とsegmenter loadはcold-startとして別に記録し、最初の解析対象frameを受ける前にprewarmを完了する。合成providerのdeadlineを950ms以下に設定し、backend内のprovider完了からpublishまでをp95 50ms未満にする。backendはsegmenter、意味判定、合成、publishの各区間を分解して計測可能にし、解析中の中間frameを無制限に蓄積してはならない。
 
 #### Scenario: プレビュー寸法が変わる
 
@@ -102,13 +112,18 @@
 
 #### Scenario: live providerがdeadlineを超える
 
-- **WHEN** AI意味判定が設定されたdeadlineを超えるかprovider errorになる
+- **WHEN** ローカル構図判定が失敗する、またはローカル構図がPASSしたframeのAI意味判定が設定されたdeadlineを超えるかprovider errorになる
 - **THEN** Agentは例外を未処理のまま捨てず、有限な`AGENT_UNAVAILABLE`状態と計測結果をpublishし、待機queueを増やさない
 
 #### Scenario: live性能ゲートを検証する
 
 - **WHEN** OpenAI Realtime sessionをprewarmし、実credentialで現在shotの代表frameを20件以上逐次判定する
 - **THEN** 計測はcold-startと各`observedAt→provider完了→backend publish`を分離して記録し、provider error 0件かつ後者のp95が1,000ms未満の場合だけlive経路を合格とする
+
+#### Scenario: ローカル構図性能ゲートを検証する
+
+- **WHEN** `u2netp` sessionをprewarmし、正解maskと構図codeを持つ公開衣類画像20件以上を本番と同じHTTP providerへ逐次投入する
+- **THEN** 計測はsegmenter cold-startとmask HTTP、bbox分類を分離し、provider error 0件、mask HTTPから構図codeまでp95 400ms未満、`CENTER_GARMENT|MOVE_CLOSER|MOVE_FARTHER|SHOW_FULL_GARMENT`が各5件以上かつ全件厳密一致の場合だけローカル構図経路を合格とする
 
 ### Requirement: 手動撮影はライブ判定により禁止されない
 

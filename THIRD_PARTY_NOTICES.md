@@ -184,10 +184,39 @@ limitations under the License.
 
 Apache License 2.0 — see [Apache License 2.0](#apache-license-20) below.
 
+## U-2-NetP (`u2netp` via rembg)
+
+- Upstream source: https://github.com/xuebinqin/U-2-Net
+- Upstream commit: `ac7e1c817ecab7c7dff5ce6b1abba61cd213ff29`
+- Upstream license: Apache License 2.0; no upstream `NOTICE` file was found.
+- Runtime adapter: rembg `v2.0.81` (MIT), which downloads and runs the ONNX
+  model without copying U-2-Net source into this repository.
+- Model URL:
+  https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx
+- Model size: `4,574,861` bytes.
+- Model SHA-256:
+  `309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8`
+- Usage: Server-side, prewarmed salient-object masking for approximate garment
+  bbox geometry during `front` and `back` live guidance only. It is not sent
+  to browsers and is not used for the final transparent preview.
+
+The rembg-distributed ONNX file contains no source-checkpoint, converter, or
+license metadata. Numerical parity testing against the official upstream
+`u2netp.pth` strongly supports that it is a conversion of that checkpoint,
+but the conversion chain is not first-party provenance. The upstream model
+was trained on DUTS-TR, whose annotation page contains separate rights
+language. This project therefore treats server-side MVP inference as an
+explicitly documented risk; redistribution of the model weights to customers
+or use under a strict commercial model audit requires separate legal review.
+
+### License
+
+Apache License 2.0 — see [Apache License 2.0](#apache-license-20) below.
+
 ## Apache License 2.0
 
 The following full license text applies to `livekit-client`, `livekit-agents`,
-`livekit`, and `livekit-api` as referenced above.
+`livekit`, `livekit-api`, and upstream U-2-NetP as referenced above.
 
 ```
                                  Apache License

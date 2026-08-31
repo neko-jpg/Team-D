@@ -10,6 +10,9 @@ from typing import TypeAlias
 
 from backend.settings import BackendSettings, ProviderMode
 
+from .garment_masker import HttpxGarmentMaskHttpClient
+from .geometry_guidance import GeometryGuidanceProvider
+from .hybrid_vision_guidance import HybridVisionGuidanceAnalyzer
 from .vision_guidance import (
     EncodedImage,
     GuidanceCode,
@@ -111,7 +114,15 @@ def create_vision_guidance_provider(
     if settings.provider_mode is ProviderMode.LIVE:
         analyzer = live_analyzer
         if analyzer is None:
-            analyzer = _create_realtime_live_analyzer()
+            semantic = _create_realtime_live_analyzer(semantic_only_geometry=True)
+            if semantic is not None:
+                analyzer = HybridVisionGuidanceAnalyzer(
+                    GeometryGuidanceProvider(
+                        HttpxGarmentMaskHttpClient(),
+                        remove_url=settings.rembg_remove_url,
+                    ),
+                    semantic,
+                )
         return LiveVisionGuidanceProvider(analyzer)
     # ``BackendSettings`` already rejects this, but keep the boundary closed
     # if a non-standard object is supplied by an integration.
@@ -140,7 +151,9 @@ def _environment_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-def _create_realtime_live_analyzer() -> LiveAnalyzer | None:
+def _create_realtime_live_analyzer(
+    *, semantic_only_geometry: bool = False
+) -> LiveAnalyzer | None:
     """Build the configured persistent Realtime analyzer without fixture fallback."""
 
     if not os.environ.get("OPENAI_API_KEY", "").strip():
@@ -180,6 +193,7 @@ def _create_realtime_live_analyzer() -> LiveAnalyzer | None:
                 64 if selected_model.startswith("gpt-realtime-2") else 32,
             ),
             reasoning_effort=reasoning_effort,
+            semantic_only_geometry=semantic_only_geometry,
         )
     except Exception:
         # Live mode stays selected.  ``LiveVisionGuidanceProvider`` reports an

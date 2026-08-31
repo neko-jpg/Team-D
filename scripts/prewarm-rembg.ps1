@@ -8,6 +8,7 @@ $modelCache = Join-Path $root '.cache\rembg'
 $fixture = Join-Path $root 'fixtures\garment\front.png'
 $outputDirectory = Join-Path $root 'tmp'
 $prewarmOutput = Join-Path $outputDirectory 'prewarm-mask.png'
+$geometryPrewarmOutput = Join-Path $outputDirectory 'prewarm-geometry-mask.png'
 
 foreach ($requiredPath in @($pythonExecutable, $rembgExecutable, $fixture)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
@@ -50,11 +51,20 @@ if ($LASTEXITCODE -ne 0) {
     throw "mask-only prewarm requestに失敗しました。exit=$LASTEXITCODE"
 }
 
+& curl.exe --fail-with-body --silent --show-error --max-time 2 -X POST 'http://127.0.0.1:7000/api/remove' -F "file=@$fixture;type=image/png" -F 'model=u2netp' -F 'om=true' -o $geometryPrewarmOutput -w "GEOMETRY_HTTP_STATUS=%{http_code}`nGEOMETRY_CONTENT_TYPE=%{content_type}`nGEOMETRY_BYTES=%{size_download}`n"
+if ($LASTEXITCODE -ne 0) {
+    throw "u2netp geometry prewarm requestに失敗しました。exit=$LASTEXITCODE"
+}
+
 $metadata = & $pythonExecutable -c "from PIL import Image; import sys; im=Image.open(sys.argv[1]); print(f'FORMAT={im.format} SIZE={im.size[0]}x{im.size[1]} MODE={im.mode} BBOX={im.getbbox()}')" $prewarmOutput
 if ($LASTEXITCODE -ne 0) { throw 'prewarm maskのPNG検証に失敗しました。' }
+$geometryMetadata = & $pythonExecutable -c "from PIL import Image; import sys; im=Image.open(sys.argv[1]); print(f'FORMAT={im.format} SIZE={im.size[0]}x{im.size[1]} MODE={im.mode} BBOX={im.getbbox()}')" $geometryPrewarmOutput
+if ($LASTEXITCODE -ne 0) { throw 'u2netp prewarm maskのPNG検証に失敗しました。' }
 
 Write-Output "PREWARM_OUTPUT=$prewarmOutput"
 Write-Output $metadata
+Write-Output "GEOMETRY_PREWARM_OUTPUT=$geometryPrewarmOutput"
+Write-Output $geometryMetadata
 if ($serverStartedHere) {
     Write-Output 'rembgはprewarm後も127.0.0.1:7000で稼働しています。'
 } else {

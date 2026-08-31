@@ -110,6 +110,31 @@ MODEL_GUIDANCE_CODES_BY_SHOT: Mapping[GuidanceShot, frozenset[GuidanceCode]] = (
     )
 )
 
+GEOMETRY_GUIDANCE_CODES = frozenset(
+    {
+        GuidanceCode.MOVE_CLOSER,
+        GuidanceCode.MOVE_FARTHER,
+        GuidanceCode.CENTER_GARMENT,
+        GuidanceCode.SHOW_FULL_GARMENT,
+    }
+)
+
+# In the production hybrid path, front/back geometry is owned exclusively by
+# the local mask classifier.  Keeping those codes out of the Realtime tool
+# schema prevents a semantic result from overriding a measured bbox.
+SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT: Mapping[
+    GuidanceShot, frozenset[GuidanceCode]
+] = MappingProxyType(
+    {
+        shot: (
+            frozenset(codes - GEOMETRY_GUIDANCE_CODES)
+            if shot in {GuidanceShot.FRONT, GuidanceShot.BACK}
+            else codes
+        )
+        for shot, codes in MODEL_GUIDANCE_CODES_BY_SHOT.items()
+    }
+)
+
 
 def _enum_value(enum_type: type[Enum], value: object, field: str) -> Enum:
     if isinstance(value, enum_type):
@@ -279,6 +304,21 @@ def validate_model_vision_decision_for_shot(
     return decision
 
 
+def validate_semantic_model_vision_decision_for_shot(
+    value: object, shot: object
+) -> VisionDecision:
+    """Reject geometry codes when the local mask classifier owns them."""
+
+    shot_value = validate_guidance_shot(shot)
+    decision = validate_vision_decision(value)
+    if decision.code not in SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT[shot_value]:
+        raise GuidanceContractError(
+            f"code {decision.code.value} is not valid semantic model guidance for "
+            f"requestedShot={shot_value.value}"
+        )
+    return decision
+
+
 @runtime_checkable
 class VisionGuidanceProvider(Protocol):
     async def analyze(self, input: GuidanceInput) -> VisionDecision | Mapping[str, object]:
@@ -287,10 +327,12 @@ class VisionGuidanceProvider(Protocol):
 
 __all__ = [
     "EncodedImage",
+    "GEOMETRY_GUIDANCE_CODES",
     "GUIDANCE_CODES",
     "GUIDANCE_CODES_BY_SHOT",
     "GUIDANCE_SHOTS",
     "MODEL_GUIDANCE_CODES_BY_SHOT",
+    "SEMANTIC_MODEL_GUIDANCE_CODES_BY_SHOT",
     "GuidanceCode",
     "GuidanceContractError",
     "GuidanceInput",
@@ -301,6 +343,7 @@ __all__ = [
     "validate_guidance_input",
     "validate_guidance_shot",
     "validate_model_vision_decision_for_shot",
+    "validate_semantic_model_vision_decision_for_shot",
     "validate_vision_decision",
     "validate_vision_decision_for_shot",
 ]
