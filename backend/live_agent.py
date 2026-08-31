@@ -21,6 +21,7 @@ import asyncio
 import inspect
 import logging
 import threading
+import time
 from collections.abc import AsyncIterable, Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -63,6 +64,7 @@ class LatestFrameSlot(Generic[FrameT]):
 
     def __init__(self) -> None:
         self._frame: Optional[FrameT] = None
+        self._observed_at: int | None = None
         self._has_frame = False
         self._closed = False
         self._replaced_count = 0
@@ -95,7 +97,7 @@ class LatestFrameSlot(Generic[FrameT]):
         with self._lock:
             return self._accepted_count
 
-    def put(self, frame: FrameT) -> bool:
+    def put(self, frame: FrameT, *, observed_at: int | None = None) -> bool:
         """Store ``frame`` and return whether it replaced a pending frame.
 
         The method never grows beyond one pending value.  A closed slot rejects
@@ -110,6 +112,7 @@ class LatestFrameSlot(Generic[FrameT]):
             if replaced:
                 self._replaced_count += 1
             self._frame = frame
+            self._observed_at = observed_at
             self._has_frame = True
             self._accepted_count += 1
             return replaced
@@ -121,13 +124,21 @@ class LatestFrameSlot(Generic[FrameT]):
     def take(self) -> Optional[FrameT]:
         """Remove and return the newest pending frame, if any."""
 
+        frame, _observed_at = self.take_observed()
+        return frame
+
+    def take_observed(self) -> tuple[Optional[FrameT], int | None]:
+        """Remove the pending frame together with its enqueue timestamp."""
+
         with self._lock:
             if not self._has_frame:
-                return None
+                return None, None
             frame = self._frame
+            observed_at = self._observed_at
             self._frame = None
+            self._observed_at = None
             self._has_frame = False
-            return frame
+            return frame, observed_at
 
     get_latest = take
     pop = take
@@ -146,6 +157,7 @@ class LatestFrameSlot(Generic[FrameT]):
             self._closed = True
             frame = self._frame if self._has_frame else None
             self._frame = None
+            self._observed_at = None
             self._has_frame = False
             return frame
 
@@ -166,6 +178,7 @@ Inference = Callable[[FrameT], ResultT | Awaitable[ResultT]]
 ResultSink = Callable[[ResultT, FrameT], Any]
 ErrorSink = Callable[[BaseException, FrameT], Any]
 GuidanceTransportFactory = Callable[[Any, Callable[[], Shot]], GuidanceTransportAdapter]
+ObservationClock = Callable[[], int]
 
 
 class LatestFrameProcessor(Generic[FrameT, ResultT]):
@@ -188,6 +201,7 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
         on_result: Optional[ResultSink[ResultT, FrameT]] = None,
         on_error: Optional[ErrorSink] = None,
         slot: Optional[LatestFrameSlot[FrameT]] = None,
+        observation_clock: ObservationClock | None = None,
     ) -> None:
         selected_inference = inference if inference is not None else infer
         if selected_inference is None:
@@ -196,6 +210,9 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
         self._on_result = on_result
         self._on_error = on_error
         self.slot = slot if slot is not None else LatestFrameSlot()
+        self._observation_clock = observation_clock or (
+            lambda: int(time.time() * 1_000)
+        )
         self._worker_task: Optional[asyncio.Task[None]] = None
         self._closed = False
         self._in_flight = 0
@@ -206,6 +223,7 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
         self._last_frame: Optional[FrameT] = None
         self._last_result: Optional[ResultT] = None
         self._last_error: Optional[BaseException] = None
+        self._current_observed_at: int | None = None
 
     @property
     def queue(self) -> LatestFrameSlot[FrameT]:
@@ -228,6 +246,12 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
     @property
     def in_flight(self) -> int:
         return self._in_flight
+
+    @property
+    def current_observed_at(self) -> int | None:
+        """Timestamp captured when the current frame entered the processor."""
+
+        return self._current_observed_at
 
     @property
     def inference_in_flight(self) -> bool:
@@ -298,7 +322,7 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
 
         if self._closed:
             return False
-        self.slot.put(frame)
+        self.slot.put(frame, observed_at=self._observation_clock())
         self._max_pending = max(self._max_pending, self.slot.qsize)
         self._ensure_worker()
         return True
@@ -318,7 +342,7 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
     async def _drain(self) -> None:
         try:
             while not self._closed:
-                frame = self.slot.take()
+                frame, observed_at = self.slot.take_observed()
                 if frame is None:
                     # ``submit_nowait`` cannot interleave with this synchronous
                     # section on the same event loop.  Clearing the task while
@@ -328,6 +352,7 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
 
                 self._in_flight = 1
                 self._max_in_flight = max(self._max_in_flight, self._in_flight)
+                self._current_observed_at = observed_at
                 self._last_error = None
                 try:
                     result = self._inference(frame)
@@ -363,6 +388,7 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
                             await sink_error
                 finally:
                     self._in_flight = 0
+                    self._current_observed_at = None
         finally:
             # Cancellation can happen while an inference is awaiting.  A
             # future submit should be able to create a fresh worker.
@@ -960,6 +986,7 @@ async def start_agent_runtime(
     on_error: Optional[ErrorSink] = None,
     stream_factory: Optional[Callable[[Any], Any]] = None,
     transport_factory: GuidanceTransportFactory | None = None,
+    observation_clock: ObservationClock | None = None,
 ) -> AgentRuntime:
     """Connect, attach camera-only handlers, and subscribe existing tracks."""
 
@@ -975,9 +1002,15 @@ async def start_agent_runtime(
         return await transport.process_frame(
             frame,
             shot=runtime_holder["value"].current_shot,
+            observed_at=processor.current_observed_at,
         )
 
-    processor = LatestFrameProcessor(process_frame, on_result=on_result, on_error=on_error)
+    processor = LatestFrameProcessor(
+        process_frame,
+        on_result=on_result,
+        on_error=on_error,
+        observation_clock=observation_clock,
+    )
     subscriber = CameraVideoTrackSubscriber(processor, stream_factory=stream_factory)
     subscriber.attach_room(room)
     runtime = AgentRuntime(room=room, subscriber=subscriber)
@@ -1010,6 +1043,7 @@ async def entrypoint(
     on_error: Optional[ErrorSink] = None,
     stream_factory: Optional[Callable[[Any], Any]] = None,
     transport_factory: GuidanceTransportFactory | None = None,
+    observation_clock: ObservationClock | None = None,
 ) -> AgentRuntime:
     """LiveKit Agents room entrypoint.
 
@@ -1029,6 +1063,7 @@ async def entrypoint(
         on_error=on_error,
         stream_factory=stream_factory,
         transport_factory=transport_factory,
+        observation_clock=observation_clock,
     )
     wait_for_shutdown = getattr(ctx, "wait_for_shutdown", None)
     if callable(wait_for_shutdown):
@@ -1048,6 +1083,7 @@ def create_agent_server(
     on_result: Optional[ResultSink[Any, Any]] = None,
     on_error: Optional[ErrorSink] = None,
     transport_factory: GuidanceTransportFactory | None = None,
+    observation_clock: ObservationClock | None = None,
 ) -> Any:
     """Build an ``AgentServer`` when LiveKit Agents is installed.
 
@@ -1074,6 +1110,7 @@ def create_agent_server(
             on_result=on_result,
             on_error=on_error,
             transport_factory=transport_factory,
+            observation_clock=observation_clock,
         )
 
     return server
@@ -1119,6 +1156,7 @@ __all__ = [
     "LatestFrameProcessor",
     "LatestFrameQueue",
     "LatestFrameSlot",
+    "ObservationClock",
     "Shot",
     "connect_agent_context",
     "create_agent_server",
