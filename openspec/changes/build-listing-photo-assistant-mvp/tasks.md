@@ -6,9 +6,9 @@
 
 ## 0. Preflight（0:00〜0:30）
 
-* [ ] 0.1 【友ちゃんさん】Python 3.11へ`rembg[cpu,cli]==2.0.81`を導入し、`birefnet-general-lite`を事前downloadして、mask-onlyのprewarm requestが成功することを確認する
-* [ ] 0.2 【健太さん】front／back／tag、dark、blur、wrong-shotのfixture画像と既知maskを用意し、各fixtureを人間が目視確認する
-* [ ] 0.3 【友ちゃんさん】Wardrobe `f44006c`、document-autocapture `e24df25`、rembg `b439167`を参照元として固定し、限定移植範囲と利用方針を決める
+* [x] 0.1 【友ちゃんさん】Python 3.11へ`rembg[cpu,cli]==2.0.81`を導入し、`birefnet-general-lite`を事前downloadして、mask-onlyのprewarm requestが成功することを確認する
+* [x] 0.2 【健太さん】front／back／tag、dark、blur、wrong-shotのfixture画像と既知maskを用意し、各fixtureを人間が目視確認する
+* [x] 0.3 【友ちゃんさん】Wardrobe `f44006c`、document-autocapture `e24df25`、rembg `b439167`を参照元として固定し、限定移植範囲と利用方針を決める
 * [ ] 0.4 【健太さん】document-autocaptureのMIT全文・著作権・commitを`THIRD_PARTY_NOTICES.md`へ記載する
 
 ## 1. 最小の縦スライス（0:30〜2:00）
