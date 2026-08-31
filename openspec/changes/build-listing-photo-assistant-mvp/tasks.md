@@ -35,41 +35,72 @@
 * [x] 2.11 【友ちゃんさん】Worker／Canvas解析不可時の固定ガイド＋手動撮影、カメラ権限拒否時のfile upload fallbackを仕様として確定する
 * [ ] 2.12 【健太さん】各fallbackが実際に動くことを確認する
 
-## 3. 撮影後AI Agent（3:30〜4:45）
+## 3. 既存capture coreのLiveKit・4slot拡張
 
-* [ ] 3.1 【友ちゃんさん】撮影後AIの責務、入力画像、返却schema、問題コード、retry条件を確定する
-* [ ] 3.2 【友ちゃんさん】Wardrobeの`normalizeImage()`の処理順を参考に、原本を保持したまま解析コピーだけをEXIF回転・sRGB化する処理方針を定義する
-* [ ] 3.3 【徹平さん】解析コピーの正規化処理を実装し、向きの異なるfixtureで確認する
-* [ ] 3.4 【友ちゃんさん】Wardrobeの`openAIAnalyze()`を参考に、画像入力＋strict JSON Schemaの`ShotAssessor`契約を定義する
-* [ ] 3.5 【友ちゃんさん】`ShotAssessor`を実装し、front／back／tag／unknownと問題コードの契約テストを通す
-* [ ] 3.6 【友ちゃんさん】`POST /api/analyze-shot`のmultipart、20秒timeout、MIME／サイズ検証、runtime schema検証を実装する
-* [ ] 3.7 【健太さん】API失敗時に進捗が変わらないテストを通す
-* [ ] 3.8 【徹平さん】ライブ`READY`でも撮影後AIが`retry`なら同じstepへ戻り、理由付きの案内になるUI・状態遷移を実装する
-* [ ] 3.9 【友ちゃんさん】T+5h時点でlive AIが不安定ならfixtureをデモ本線へ切り替える判断を行い、live失敗を黙って成功へ変換しない方針を維持する
+- [ ] 3.1 【友ちゃんさん】LiveKit project、Room、browser participant、Python Agent用の環境変数と最小接続手順を用意し、同じRoomのparticipant一覧と両側ログでbrowserとAgentの一意なidentityを確認する
+- [ ] 3.2 【友ちゃんさん・健太さん】LiveKit Agents／Python SDKとLiveKit JS SDKの互換性があるstable versionをPython／npm lockfileへ固定し、clean installとSDK importを成功させ、製品名、version、URL、license／noticeを`THIRD_PARTY_NOTICES.md`の固定値と照合する
+- [ ] 3.3 【友ちゃんさん・健太さん】完了済みNode.js API scaffoldの`/api/health`契約を保ったまま、FastAPI serverとLiveKit Agent workerがprovider schemaと設定を共有するPython packageへbackendを移行し、ルートからfixture／liveを起動してfrontend build、Python import、health response、Agent起動ログを確認する
+- [ ] 3.4 【友ちゃんさん】既存のfront／back／tag契約を、`GuidanceEvent`、measurementを含む4slot、正規化4端点、`MeasurementDraft`／`ApprovedMeasurement`、接続状態、provider errorへ後方互換に拡張し、未知値、欠落、非有限値、範囲外座標、measurementを含む`ShotAssessment`を拒否する契約テストを通す
+- [ ] 3.5 【徹平さん】既存`CaptureReducer`を、工程、撮影phase、接続状態を分離した`front→back→tag→measurement準備→measurement撮影→採寸確認・承認→edit`へ拡張し、受理済み4slotと`approved_cv|approved_manual`からだけ次stepを導出して、撮り直し、再接続、不正なAI `nextAction`、古い`requestId`で別slotや採寸状態が変わらないReducerテストを通す
+- [ ] 3.6 【徹平さん・健太さん】既存upload fixture縦スライスを`1/4 正面→2/4 背面→3/4 タグ→4/4 採寸`へ拡張し、4枚の保持後も採寸が`needs_review`なら編集開始を無効にし、測定線と数値の明示承認後だけeditへ進むUI統合テストを通す
+- [ ] 3.7 【友ちゃんさん】`POST /api/livekit-token`で、設定上限内の短い有効期限、sessionに対応するRoom、一意なparticipant identity、camera publishと必要なdata通信だけを許可するtokenを発行し、decodeしたclaimと、LiveKit API secretがresponse／browser bundleへ含まれないことをテストする
+- [ ] 3.8 【徹平さん・健太さん】LiveKit JS SDKでRoomへ接続し、2.2で実装する背面camera trackをpublishして、工程と独立した`connecting|connected|reconnecting|disconnected`をUIへ反映し、基準iPhoneのparticipant一覧とtrack情報で接続を確認する
+- [ ] 3.9 【友ちゃんさん】Python LiveKit AgentをRoom participantとして起動し、camera video trackへsubscribeして、frame arrivalごとに上書きするcapacity 1のlatest-frame slotと同時推論1件のprocessorを実装し、推論中に3frame以上を流してもqueueが1を超えず、完了後は最新frameだけが処理されるテストを通す
+- [ ] 3.10 【友ちゃんさん】現在shotと縮小frameを受ける`VisionGuidanceProvider`と`GuidanceStateMachine`を実装し、有限codeへのruntime validation、session単位の単調増加sequence、`observedAt`／`expiresAt`、同一shot／codeのdedupe、短命助言と再同期のtransport区分を契約テストで確認する
+- [ ] 3.11 【徹平さん】LiveKit data eventを購読し、session／shot不一致、既読以下のsequence、期限切れeventを破棄したうえで、Agentと端末内の候補から工程不成立→欠け→構図→角度／しわ→品質→安定性の優先順で主指示を1件だけ選ぶselectorを実装し、時間ベースのenter／clear hysteresis、解消時の短い肯定、`READY`安定化をfake clockでテストする
+- [ ] 3.12 【健太さん】2.10の固定ガイドと手動シャッターを、全画面camera、固定された進捗・戻る・help・light・shutter、アプリ所有の短い日本語案内へ拡張し、confidence／診断語を表示せず、助言変更で操作位置が動かず、`READY`以外でもraw Blobを撮影できることをcomponent／画像fixtureで確認する
+- [ ] 3.13 【健太さん】権限待ち、各主指示、解消の肯定、ready、撮影中、検証中、撮り直し、再接続、offline、4slot進捗を決定的なStorybook fixtureで再現し、390×844、375×812、430×932、200%文字拡大、safe area、44px操作領域、`aria-live`抑制、reduced motion、visible focusをvisual／accessibility testで確認する
+- [ ] 3.14 【徹平さん・健太さん】Room切断／Agent停止時にも固定ガイド、端末内品質助言、手動撮影、現在step、受理済みslotを維持し、有限回の自動再接続後は明示的な再試行を提示して、server snapshot同期後の新sequenceからだけ助言を再開する統合テストを通す
+- [ ] 3.15 【徹平さん・健太さん】2.12のfile upload／解析不可fallbackを4slotへ拡張し、画像、判定、助言、測定状態をsession memoryとobject URLだけに保持してDB／`localStorage`／`IndexedDB`へ書き込まず、終了、unmount、`pagehide`、再取得時にcamera track、Room、object URLを解放し、`visibilitychange`後に古い映像へ`READY`を残さないlifecycleテストを通す
 
-## 4. 正面画像のmaskと背景生成（4:45〜6:15）
+### 第3章完了ゲート
 
-* [ ] 4.1 【友ちゃんさん】mask生成、背景生成、fallbackの責務分離とインターフェースを確定する
-* [ ] 4.2 【友ちゃんさん】rembgをloopbackの7000番で`--threads 1 --no-ui`起動し、`file`、`model=birefnet-general-lite`、`om=true`でPNG maskを返すことを確認する
-* [ ] 4.3 【友ちゃんさん】`POST /api/remove-background`と`GarmentMasker`を実装し、35秒timeout、PNG、元画像との寸法一致、空／全面maskを検証する
-* [ ] 4.4 【友ちゃんさん】`BackgroundGenerator`の許可style、固定prompt、商品画像を送らずテキストだけで生成する契約を定義・実装する
-* [ ] 4.5 【友ちゃんさん】背景生成60秒timeoutと固定背景fallbackの条件を定義する
-* [ ] 4.6 【健太さん】背景生成失敗時でも撮影slotと正面原本が保持されることを確認する
-* [ ] 4.7 【健太さん】maskと背景生成が正面1枚だけへ適用され、backとtagの原本が変更されないテストを通す
+- [ ] 3.16 【友ちゃんさん・徹平さん・健太さん】fixture transportで正常、撮り直し、判定timeout、measurement未承認、古いevent、resize／回転、切断／再接続、解析不可、権限拒否を順に実行し、撮影済みBlob hash、現在step、採寸状態が不正に変わらず、4slot＋明示承認が揃う前はeditへ進めないことを1コマンドの回帰テストで確認する
+- [ ] 3.17 【健太さん】基準iPhoneで端末内品質解析を4Hz／同時解析1、Agent意味判定を同時1で計測し、状態変化からUI表示までp95 500ms以内、`observedAt`からAI助言表示までp95 2秒以内、待機queue最大1、console未処理error 0件をログへ記録し、目標外でもqueueを増やさないことを確認する
 
-## 5. 合成・承認・保存（6:15〜7:15）
+## 4. 撮影後AI判定
 
-* [ ] 5.1 【友ちゃんさん】原本・mask・背景・preview・approved imageのデータフローと保存条件を確定する
-* [ ] 5.2 【徹平さん】native Canvas 2Dで背景、正面原本、maskを合成し、商品mask内が元画像RGB、mask外が背景になる画像fixtureテストを通す
-* [ ] 5.3 【徹平さん】元画像と合成画像の比較、初期未承認、合成採用、元画像採用を実装し、未承認previewを保存できないテストを通す
-* [ ] 5.4 【徹平さん】承認済み正面画像を`toBlob`でPNGまたはJPEG保存し、正しい画像だけが出力されることを確認する
-* [ ] 5.5 【友ちゃんさん】T+6.5hで合成が完了していない場合、生成背景を停止して白背景1種へ固定する判断を行い、比較・承認・保存を優先する
+- [ ] 4.1 【友ちゃんさん】Wardrobeのstrict schemaパターンを参考に`ShotAssessor`を実装し、`shotType`、`quality`、有限な`issues`、`missingShots`、`nextAction`の全fieldをruntime検証して、front／back／tag／unknown以外、measurement、未知enum、field欠落を拒否する契約テストを通す
+- [ ] 4.2 【徹平さん】正面原本を変更せず解析コピーだけをEXIF回転・sRGB正規化する処理を実装し、向きと色空間が異なるfront／back／tag fixtureで、原本hash不変と解析画像の期待寸法・向きを確認する
+- [ ] 4.3 【友ちゃんさん】FastAPIの`POST /api/analyze-shot`へ`requestedShot: front|back|tag`、multipart、20秒timeout、MIME／size制限、runtime schema検証を実装し、measurement指定、schema不正、timeout時に進捗を変更しないAPI／統合テストを通す
+- [ ] 4.4 【徹平さん】ライブ`READY`でも撮影後AIが`retry`なら、有限issueから最優先の理由と具体的な撮り直し方を1件表示して同じshotへ戻し、対象slotだけを未受理にして他slotを保持し、撮り直し後に届いた古いrequest結果を無視するUI／Reducerテストを通す
+- [ ] 4.5 【友ちゃんさん】live `ShotAssessor`がデモ時間内に安定しない場合は`PROVIDER_MODE=fixture`へ明示的に切り替える手順と継続／停止条件をrunbookへ記録し、live errorをfixture成功responseへ自動変換しない契約テストを通す
 
-## 6. 統合検証とデモ準備（7:15〜8:00）
+## 5. 50mmマーカーによる半自動採寸
 
-* [ ] 6.1 【友ちゃんさん】OpenSpec Scenarioと実装・テストの対応関係を最終確認する
-* [ ] 6.2 【健太さん】fixtureで「ライブ助言→front／back／tag→撮り直し→mask→背景→比較→承認→保存」を通す
-* [ ] 6.3 【徹平さん・友ちゃんさん】live providerで代表トップス1着を実機撮影し、4Hz解析、撮影後判定、正面mask、背景生成、合成を手動確認する
-* [ ] 6.4 【健太さん】rembg prewarm、`/api/health`、fixture/live切替、ngrok起動、timeout時の操作をrunbookへ記載して再実行する
-* [ ] 6.5 【健太さん】`npm run build`、型チェック、主要テストを成功させる
-* [ ] 6.6 【友ちゃんさん】`openspec validate "build-listing-photo-assistant-mvp" --type change --strict --no-interactive`を成功させ、仕様とのズレがないことを最終確認する
+- [ ] 5.1 【友ちゃんさん・健太さん】OpenCV.js／WASMのstable version、公式配布URL、checksum、Apache-2.0 license／noticeを固定し、依存がない環境でWorker初期化とchecksum照合を成功させる
+- [ ] 5.2 【健太さん】外形50.0mm角・5mm黒枠・内側40.0mm角の白地からなる二重正方形マーカーを100%倍率で印刷し、外形4辺が各50mmであることを定規で確認して、印刷設定と実測結果をrunbookへ記録する。また、正常、欠け、複数、小さすぎ、遮蔽、衣類欠け、重なり、segmentation失敗、端点不正の採寸fixtureと既知scale／4端点／着丈／身幅をmanifestで目視確認する
+- [ ] 5.3 【徹平さん・健太さん】tag受理後に、対象が半袖クルーネックTシャツであること、背面を上にして襟・袖・裾・しわを整えること、無地でコントラストのある同一平面へ実測済みマーカーを衣類から30mm以上離した右下に置くことをチェックリストで案内し、フード、襟付き、長袖、パンツ、スカート、ワンピースを対応対象として表示しない。準備完了後の`4/4 採寸`で衣類全体安全枠とマーカー枠、常時有効な手動シャッターを表示するUIテストを通す
+- [ ] 5.4 【徹平さん】measurementのraw画像を`ShotAssessment`へ送らずOpenCV.js専用Workerへ渡し、二重輪郭候補抽出、四角形近似、四隅順序付け、homography／射影補正、50mm辺からのpx/cm計算を実装して、最短辺80px、端から16px超、短辺／長辺0.65以上、衣類との間隔24px以上、衣類全体収容の境界fixtureを有限な失敗codeへ分類するテストを通す
+- [ ] 5.5 【友ちゃんさん】`POST /api/suggest-measurement-points`と`MeasurementLineProvider`を実装し、射影補正済み写真1枚から`lengthStart|lengthEnd|widthStart|widthEnd`の0〜1正規化座標だけをstrict schemaで返して、cm値、UI文言、画面遷移、範囲外／非有限座標、欠落、timeoutを拒否する契約テストを通す
+- [ ] 5.6 【徹平さん】有効な4端点を補正面へ写像し、背面襟中央付け根から裾中央までの着丈と左右脇下間の平置き身幅をOpenCV.jsで計算して0.1cm単位で表示し、身幅を2倍しないこと、provider失敗時は衣類輪郭上の粗いdraftまたは利用者の4端点配置へ切り替わることを計算／fallbackテストで確認する
+- [ ] 5.7 【徹平さん】着丈・身幅の4端点を44px以上の操作領域でドラッグ修正するたびに値と既存承認を再計算・解除し、画像外または衣類領域から大きく外れた端点では`ENDPOINTS_INVALID`として承認を無効にする。着丈20〜100cm／身幅20〜80cmの範囲外は再確認後の承認を残し、明示操作後だけ`approved_cv`となるUI／Reducerテストを通す
+- [ ] 5.8 【健太さん】マーカー／segmentation／端点提案の失敗時に、front／back／tagと衣類全体が写ったmeasurement画像を保持し、有限な理由、具体的な撮り直し、4端点配置、着丈／身幅の手入力を提示する。衣類全体が写る場合だけ手入力可能にし、値設定だけでは承認せず明示操作後だけ`approved_manual`となり、live失敗をfixture成功へ置き換えないfallbackテストを通す
+- [ ] 5.9 【徹平さん】OpenCV.jsをdedicated Workerへ遅延loadし、`ImageBitmap`または縮小`ImageData`を渡してmain threadを塞がず、requestId不一致／cancel後の結果を破棄し、連続撮影、再採寸、終了時にWorker、ImageBitmap、WASM objectを解放してメモリが増え続けないことを計測する
+- [ ] 5.10 【徹平さん・健太さん】採寸準備、解析中、端点編集、範囲外警告、マーカー各失敗、手入力、CV承認、手入力承認をStorybook／interaction fixtureで確認し、代表Tシャツをメジャー実測して同じ服を3回撮影し、利用者補正・承認後の着丈と身幅が各±1.0cm以内になることを計測記録で確認する
+
+## 6. 正面mask・背景生成
+
+- [ ] 6.1 【友ちゃんさん】0.1で用意した`rembg[cpu,cli]==2.0.81`と`birefnet-general-lite`の製品名、固定version／commit、配布URL、license／noticeを`THIRD_PARTY_NOTICES.md`と照合したうえで、rembgをloopbackの7000番で`--threads 1 --no-ui`付きで起動し、fixture frontを本番と同じ`file`、`model=birefnet-general-lite`、`om=true`で送信して、元画像と同寸法のmask-only PNGが返るprewarm手順を再現する
+- [ ] 6.2 【友ちゃんさん】FastAPIの`POST /api/remove-background`と`GarmentMasker`へ35秒timeout、`image/png`、元画像との寸法一致、空／全面mask検証を実装し、timeout、非PNG、寸法不一致、空、全面のfixtureがerrorとなり、不完全previewを承認可能にしないテストを通す
+- [ ] 6.3 【友ちゃんさん】許可されたstyle IDを「空の撮影背景、真上視点、均一照明、人物・衣類・ハンガー・文字・ロゴなし」の固定promptへ変換する`BackgroundGenerator`を実装し、request spyで送信bodyがテキストだけで商品画像、mask、tag、measurement、binary fieldを含まないことをテストする
+- [ ] 6.4 【健太さん】背景生成の60秒timeout、error、利用不能画像をfixtureで発生させ、4slot、front原本、承認済み採寸値を保持したまま再試行、ローカル固定背景、元画像採用を提示し、固定背景からpreviewへ継続できる統合テストを通す
+- [ ] 6.5 【健太さん】maskと背景生成がfrontだけへ適用され、back／tag／measurementの原本、受理状態、測定端点、承認済み採寸値を変更しないことをBlob hashとstate snapshotで確認する
+
+## 7. 合成・承認・保存
+
+- [ ] 7.1 【徹平さん】native Canvas 2Dで背景、front原本、maskを同一寸法へ合成し、mask内が元画像RGB、mask外だけが背景になり、商品領域の色、柄、形、傷、汚れを再生成・レタッチしないことを画像fixtureのpixel比較で確認する
+- [ ] 7.2 【徹平さん・健太さん】元画像と合成画像を同じaspect ratio／表示領域で比較できるUIを実装し、初期状態とmask異常時は未承認、元画像または現在の合成画像を明示選択した場合だけ承認済みとなり、選択変更と再生成で承認が適切に解除されるUI／visual testを通す
+- [ ] 7.3 【徹平さん】明示選択された承認済みfrontだけを`toBlob`でPNGまたはJPEGとして保存し、MIME type、画像寸法、pixel hashが選択結果と一致し、back／tag／measurement／未承認preview／処理途中画像が出力されないことをテストする
+- [ ] 7.4 【友ちゃんさん】背景生成がデモ時間内に安定しない場合は生成providerを停止して白背景1種へ固定する判断基準と復旧操作をrunbookへ記録し、比較、明示承認、保存のfixture経路を再実行して原本採用も可能なことを確認する
+
+## 8. 統合検証・デモ準備
+
+- [ ] 8.1 【健太さん】fixture E2Eを1コマンドで実行し、「Room接続→1件だけのAI助言→front／back／tag／measurement→理由付き撮り直し→採寸端点修正・承認→mask→背景→比較→明示承認→保存」を2回連続で完走させ、同じ最終state、採寸値、出力pixel hashを得る
+- [ ] 8.2 【徹平さん・友ちゃんさん】代表Tシャツ1着と基準iPhoneで、camera publish、Agent subscribe、有限codeの変化、`READY`以外の手動撮影、front／back／tagの撮影後判定、measurement専用検証と4端点提案、補正・承認、front mask、背景生成、比較、承認、保存を操作し、結果と性能計測をrunbookへ記録する
+- [ ] 8.3 【健太さん】順序逆転／期限切れevent、Room再接続、Agent停止、端末内解析不可、カメラ権限拒否、撮影後AI timeout、マーカー解析／端点提案失敗、rembg timeout／無効mask、背景生成失敗をfixtureで発生させ、現在step、受理済みslot、採寸値、原本が不正に変わらず、保持内容と再試行／手入力／代替操作がUIに示されるfallback統合テストを通す
+- [ ] 8.4 【健太さん】実画像を使い、390×844、375×812、430×932のiPhone相当viewportとSafari実機で、full-bleed映像、safe area、browser chrome、ホームインジケータ、200%文字拡大、44px操作領域、visible focus、screen reader、reduced motion、背景復帰、長い日本語でも進捗、主指示、操作が重ならず固定位置を保つことをvisual QA記録で確認する
+- [ ] 8.5 【徹平さん・健太さん】セッション終了後にcamera trackが`ended`、Roomが切断済み、Workerが終了済み、全object URLがrevoke済みで、DB／`localStorage`／`IndexedDB`に画像、判定、助言、測定点、採寸値がなく、back／tag／measurementが出品画像として保存されないことを確認する
+- [ ] 8.6 【健太さん】LiveKit／Agent起動、OpenCV.js／WASM事前load、50mmマーカー印刷・実測、rembg prewarm、`/api/health`、`PROVIDER_MODE=fixture|live`切替、各timeoutと切断からの復旧手順をコピー可能なコマンドと期待結果付きでrunbookへ記載し、新しいterminal sessionから手順どおり再実行する
+- [ ] 8.7 【健太さん】lockfileからclean installした環境でfrontend／Python backend／Agentを起動し、`npm run build`、`npm run typecheck`、frontend／Pythonのunit・contract・integration・E2E testを実行して失敗0件、browser console未処理error 0件を確認する
+- [ ] 8.8 【友ちゃんさん】runbookへ全Requirement／Scenarioとtask番号、test名または実機確認手順の対応表を追加し、未対応Scenarioが0件であることを確認したうえで、`openspec validate "build-listing-photo-assistant-mvp" --type change --strict --no-interactive`を成功させる
