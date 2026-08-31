@@ -56,6 +56,10 @@ from .vision_guidance import (
     VisionDecision,
     VisionGuidanceProvider,
 )
+from .vision_guidance_responses import (
+    ResponsesVisionGuidanceAnalyzer,
+    VISION_GUIDANCE_JSON_SCHEMA,
+)
 from .shot_assessor import (
     AssessmentImage,
     ResponsesShotAssessor,
@@ -108,12 +112,14 @@ __all__ = [
     "ProviderUnavailableError",
     "ResponsesMeasurementLineProvider",
     "ResponsesShotAssessor",
+    "ResponsesVisionGuidanceAnalyzer",
     "ShotAssessment",
     "ShotAssessmentContractError",
     "ShotAssessor",
     "ShotAssessorInput",
     "VisionDecision",
     "VisionGuidanceProvider",
+    "VISION_GUIDANCE_JSON_SCHEMA",
     "create_provider_inference",
     "create_measurement_line_provider",
     "create_shot_assessor",

@@ -112,8 +112,13 @@ class GarmentMasker:
     def __init__(
         self,
         client: GarmentMaskHttpClient,
+        *,
+        remove_url: str = REMBG_REMOVE_URL,
     ) -> None:
+        if not isinstance(remove_url, str) or not remove_url:
+            raise GarmentMaskContractError("rembg remove URL must be a non-empty string")
         self._client = client
+        self._remove_url = remove_url
 
     async def mask(self, front: GarmentMaskInput) -> GarmentMask:
         if not isinstance(front, GarmentMaskInput):
@@ -128,7 +133,7 @@ class GarmentMasker:
         data = {"model": REMBG_MODEL, "om": "true"}
         try:
             response = await self._client.post(
-                REMBG_REMOVE_URL,
+                self._remove_url,
                 files=files,
                 data=data,
                 timeout=REMBG_TIMEOUT_SECONDS,

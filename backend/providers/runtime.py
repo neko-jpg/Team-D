@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 import inspect
+import os
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TypeAlias
 
@@ -75,10 +77,70 @@ def create_vision_guidance_provider(
     if settings.provider_mode is ProviderMode.FIXTURE:
         return FixtureVisionGuidanceProvider()
     if settings.provider_mode is ProviderMode.LIVE:
-        return LiveVisionGuidanceProvider(live_analyzer)
+        analyzer = live_analyzer
+        if analyzer is None:
+            analyzer = _create_responses_live_analyzer()
+        return LiveVisionGuidanceProvider(analyzer)
     # ``BackendSettings`` already rejects this, but keep the boundary closed
     # if a non-standard object is supplied by an integration.
     raise ProviderUnavailableError("unsupported provider mode")
+
+
+def _create_responses_live_analyzer() -> LiveAnalyzer | None:
+    """Build the configured live analyzer without ever selecting a fixture."""
+
+    if not os.environ.get("OPENAI_API_KEY", "").strip():
+        return None
+    try:
+        from openai import AsyncOpenAI  # type: ignore[import-not-found]
+
+        from .vision_guidance_responses import ResponsesVisionGuidanceAnalyzer
+
+        client = AsyncOpenAI().responses
+        model = os.environ.get("VISION_GUIDANCE_MODEL", "").strip()
+        return ResponsesVisionGuidanceAnalyzer(client, model or "gpt-5.6-luna")
+    except Exception:
+        # Live mode stays selected.  ``LiveVisionGuidanceProvider`` reports an
+        # explicit unavailable error when the analyzer cannot be constructed.
+        return None
+
+
+def _encode_livekit_video_frame(frame: object) -> EncodedImage | None:
+    """Convert an actual LiveKit raw frame into one bounded JPEG provider input."""
+
+    convert = getattr(frame, "convert", None)
+    frame_type = getattr(frame, "type", None)
+    if not callable(convert) or frame_type is None:
+        return None
+    try:
+        from livekit import rtc  # type: ignore[import-not-found]
+        from PIL import Image
+
+        rgba = (
+            frame
+            if frame_type == rtc.VideoBufferType.RGBA
+            else convert(rtc.VideoBufferType.RGBA)
+        )
+        width = int(getattr(rgba, "width"))
+        height = int(getattr(rgba, "height"))
+        if width <= 0 or height <= 0:
+            raise ValueError("invalid LiveKit frame dimensions")
+        image = Image.frombytes("RGBA", (width, height), bytes(rgba.data)).convert("RGB")
+        image.thumbnail((640, 640), Image.Resampling.LANCZOS)
+        output = BytesIO()
+        image.save(output, format="JPEG", quality=85, optimize=True)
+        return EncodedImage(
+            output.getvalue(),
+            "image/jpeg",
+            width=image.width,
+            height=image.height,
+        )
+    except ProviderUnavailableError:
+        raise
+    except Exception as error:
+        raise ProviderUnavailableError(
+            "LiveKit camera frame could not be encoded for guidance"
+        ) from error
 
 
 def guidance_input_from_frame(
@@ -101,6 +163,13 @@ def guidance_input_from_frame(
     if isinstance(frame, (bytes, bytearray, memoryview)):
         encoded = EncodedImage(data=bytes(frame))
         return GuidanceInput(frame=encoded, requested_shot=requested_shot)
+
+    encoded_livekit_frame = _encode_livekit_video_frame(frame)
+    if encoded_livekit_frame is not None:
+        return GuidanceInput(
+            frame=encoded_livekit_frame,
+            requested_shot=requested_shot,
+        )
 
     raw_data = getattr(frame, "data", None)
     if raw_data is None:
