@@ -89,7 +89,7 @@ def create_shot_assessor(
     try:
         client = live_client or _create_responses_client()
         model = live_model or os.environ.get(
-            "SHOT_ASSESSOR_MODEL", "gpt-4.1-mini-2025-04-14"
+            "SHOT_ASSESSOR_MODEL", "gpt-5.6-luna"
         )
         return ResponsesShotAssessor(client, model)
     except LiveShotAssessorUnavailable:
