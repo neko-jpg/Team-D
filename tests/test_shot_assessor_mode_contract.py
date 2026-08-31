@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from backend.app import create_app
 from backend.config import BackendSettings
@@ -20,6 +22,12 @@ def _settings(mode: str) -> BackendSettings:
 class FailingLiveShotAssessor:
     async def assess(self, input: ShotAssessorInput) -> object:
         raise TimeoutError("simulated provider timeout")
+
+
+def jpeg_image() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (4, 3), (180, 40, 70)).save(output, format="JPEG")
+    return output.getvalue()
 
 
 def test_fixture_mode_returns_its_deterministic_success_response() -> None:
@@ -50,7 +58,7 @@ def test_fixture_route_requires_the_explicit_fixture_mode(
         response = client.post(
             "/api/analyze-shot",
             data={"requestedShot": "front"},
-            files={"file": ("front.jpg", b"fixture-image", "image/jpeg")},
+            files={"file": ("front.jpg", jpeg_image(), "image/jpeg")},
         )
 
     assert response.status_code == 200
@@ -87,7 +95,7 @@ def test_live_route_reports_provider_failure_instead_of_fixture_success(
         response = client.post(
             "/api/analyze-shot",
             data={"requestedShot": "front"},
-            files={"file": ("front.jpg", b"live-image", "image/jpeg")},
+            files={"file": ("front.jpg", jpeg_image(), "image/jpeg")},
         )
 
     assert response.status_code == 503

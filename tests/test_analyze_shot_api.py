@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from io import BytesIO
 from typing import Literal
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from backend.analyze_shot import (
     MAX_UPLOAD_BYTES,
@@ -74,8 +76,14 @@ def install_assessor(client: TestClient, assessor: object, *, timeout: float | N
         client.app.dependency_overrides[get_analysis_timeout_seconds] = lambda: timeout
 
 
-def multipart(image: bytes = b"image") -> dict[str, tuple[str, bytes, str]]:
-    return {"file": ("garment.jpg", image, "image/jpeg")}
+def jpeg_image() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (4, 3), (180, 40, 70)).save(output, format="JPEG")
+    return output.getvalue()
+
+
+def multipart(image: bytes | None = None) -> dict[str, tuple[str, bytes, str]]:
+    return {"file": ("garment.jpg", jpeg_image() if image is None else image, "image/jpeg")}
 
 
 def test_analyze_shot_accepts_multipart_front_upload_and_returns_valid_assessment(
@@ -83,17 +91,19 @@ def test_analyze_shot_accepts_multipart_front_upload_and_returns_valid_assessmen
 ) -> None:
     assessor = RecordingAssessor(valid_assessment())
     install_assessor(client, assessor)
+    original = jpeg_image()
 
     response = client.post(
-        "/api/analyze-shot", data={"requestedShot": "front"}, files=multipart(b"front-image")
+        "/api/analyze-shot", data={"requestedShot": "front"}, files=multipart(original)
     )
 
     assert response.status_code == 200
     assert response.json() == valid_assessment()
     assert len(assessor.requests) == 1
     request = assessor.requests[0]
-    assert request.image.data == b"front-image"
-    assert request.image.mime_type == "image/jpeg"
+    assert request.image.data != original
+    assert request.image.data.startswith(b"\x89PNG\r\n\x1a\n")
+    assert request.image.mime_type == "image/png"
     assert request.requested_shot.value == "front"
 
 
@@ -121,7 +131,7 @@ def test_invalid_provider_schema_returns_error_without_progress_change(client: T
     before = dict(caller_progress)
 
     response = client.post(
-        "/api/analyze-shot", data={"requestedShot": "back"}, files=multipart(b"back-image")
+        "/api/analyze-shot", data={"requestedShot": "back"}, files=multipart()
     )
 
     assert response.status_code == 502
@@ -150,7 +160,7 @@ def test_timeout_returns_error_without_progress_change(client: TestClient) -> No
     before = dict(caller_progress)
 
     response = client.post(
-        "/api/analyze-shot", data={"requestedShot": "tag"}, files=multipart(b"tag-image")
+        "/api/analyze-shot", data={"requestedShot": "tag"}, files=multipart()
     )
 
     assert response.status_code == 504

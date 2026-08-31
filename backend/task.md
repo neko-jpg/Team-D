@@ -27,9 +27,9 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 1.1 【ともちゃん】front／back／tagのupload bytesから、原本bytesを変更せず、EXIF orientationを反映してsRGBへ変換した解析専用コピーを生成する処理を`backend/**`へ実装する。decode不能、未対応形式、変換失敗を明示的なエラーにし、原本を上書きしない。
 
-- [ ] 1.2 【健太】`POST /api/analyze-shot`でraw uploadではなく正規化済み解析コピーだけを`ShotAssessor`へ渡すよう`backend/**`内で接続する。正規化失敗時はproviderを呼ばず、有限なAPI errorを返す。
+- [x] 1.2 【健太】`POST /api/analyze-shot`でraw uploadではなく正規化済み解析コピーだけを`ShotAssessor`へ渡すよう`backend/**`内で接続する。正規化失敗時はproviderを呼ばず、有限なAPI errorを返す。
 
-- [ ] 1.3 【健太】向きと色空間が異なるfront／back／tag fixtureを使い、入力bytesのhash不変、出力の期待寸法・向き・sRGB、およびproviderへ渡ったbytesが正規化済みであることを`backend/tests/**`で確認する。
+- [x] 1.3 【健太】向きと色空間が異なるfront／back／tag fixtureを使い、入力bytesのhash不変、出力の期待寸法・向き・sRGB、およびproviderへ渡ったbytesが正規化済みであることを`backend/tests/**`で確認する。
 
 ## 2. 採寸端点提案API（元タスク5.5）
 
