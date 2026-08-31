@@ -10,7 +10,7 @@ LiveKit Agentsをライブ撮影体験の中核にし、小さなReactモバイ�
 - ハッカソンではLiveKit CloudをRoom基盤として使い、SDK／AgentコードはOSSを利用。必要なら同じ構成でself-hostへ移行可能
 - Wardrobeは設計参考のみ
 - document-autocaptureはMIT表記を保持して必要関数だけ移植
-- OpenCV.jsは50mmマーカー検出、射影補正、着丈・身幅の計算に限定使用
+- OpenCV.jsは50mm専用マーカー検出、射影補正、着丈・身幅の距離計算に限定使用
 - rembg v2.0.81をローカルHTTP sidecarとして実行
 - BiRefNet General Liteをrembg経由で使用
 - 合成はnative Canvas 2D、状態管理は`useReducer`
@@ -40,6 +40,7 @@ Mobile browser ── HTTPS /api ──→ Python FastAPI
 Python backend package
   ├─ LiveKitTokenIssuer ───→ Room access token
   ├─ ShotAssessor ──────→ Responses API
+  ├─ MeasurementPointSuggester → Responses API
   ├─ BackgroundGenerator → Images API (text only)
   └─ GarmentMasker ─────→ rembg HTTP / BiRefNet
 ```
@@ -53,8 +54,9 @@ Python backend package
 | `CameraController` | 背面カメラ、権限、video再生、track解放、raw撮影 |
 | `LiveKitSessionClient` | 短命token取得、Room接続、camera track publish、イベント購読、再接続 |
 | `LiveQualityAnalyzer` | 固定ROI、輝度、Laplacianブレ、フレーム差分による即時補助判定 |
-| `MeasurementProcessor` | 50mmマーカー検出、射影補正、px/cm換算、着丈・身幅の初期測定線 |
+| `MeasurementProcessor` | 50mm専用マーカー検出、射影補正、px/cm換算、4端点からの距離計算 |
 | `MeasurementReview` | 4端点のドラッグ修正、cm再計算、明示承認、手入力fallback |
+| `MeasurementPointSuggester` | 補正済み採寸写真から4つの意味的端点を正規化座標で1回だけ提案 |
 | `SemanticGuidanceProcessor` | Agent側の最新フレーム選択、AI意味判定、古い結果の破棄 |
 | `GuidanceStateMachine` | AI出力を有限コードへ変換、重複抑制、sequence／expiry付与、push |
 | `CaptureReducer` | 正面→背面→タグ→採寸、撮り直し、受け入れ済み画像と採寸承認の保持 |
@@ -144,14 +146,14 @@ Python backend package
 
 対象: [OpenCV](https://github.com/opencv/opencv)、[OpenCV.js documentation](https://docs.opencv.org/4.x/d5/d10/tutorial_js_root.html)。実装開始時に公式配布のstable OpenCV.js／WASMを固定し、配布元URLとchecksumをlock情報へ記録する。
 
-採用形態は**ブラウザ内の採寸前処理に限る実行時依存**。メインスレッドを塞がないようWeb Workerで実行し、採寸写真を外部AIへ送らずに幾何処理する。
+採用形態は**ブラウザ内の採寸前処理に限る実行時依存**。メインスレッドを塞がないようWeb Workerで実行する。幾何処理とcm換算は外部AIへ依存しない。
 
 | 使用する部分 | 今回の用途 |
 |---|---|
-| `cvtColor`、threshold／Canny | 50mm正方形マーカーと衣類輪郭の候補抽出 |
+| `cvtColor`、threshold／Canny | 50mm二重正方形マーカーと衣類輪郭の候補抽出 |
 | `findContours`、`approxPolyDP`、`contourArea` | 四角形マーカーの検出と最大衣類輪郭の抽出 |
 | `getPerspectiveTransform`、`warpPerspective` | マーカー四隅を基準に撮影面を射影補正 |
-| 点間距離などの画素幾何 | マーカー1辺=5.0cmからpx/cmを求め、着丈・身幅を0.1cm単位へ換算 |
+| 点間距離などの画素幾何 | マーカー外形1辺=5.0cmからpx/cmを求め、着丈・身幅を0.1cm単位へ換算 |
 
 使わないもの:
 
@@ -160,7 +162,7 @@ Python backend package
 - camera UI、汎用物体認識、衣類カテゴリ分類
 - OpenCVの自動結果だけによる採寸確定
 
-OpenCV.jsだけでは「襟ぐり中央」「脇下」の意味点を確実に識別できない。輪郭から初期線を提案するが、4端点の利用者補正と明示承認を採寸値の確定条件にする。
+OpenCV.jsだけでは「襟ぐり中央」「脇下」の意味点を確実に識別できない。撮影後画像AIが4端点を正規化座標で提案し、OpenCV.jsがcmへ換算する。AI失敗時は輪郭上の粗い線または利用者の端点配置へfallbackし、いずれも利用者補正と明示承認を確定条件にする。
 
 ### 4.5 rembg / BiRefNet
 
@@ -198,7 +200,7 @@ API側は35秒timeout、PNG、元画像との寸法一致、空／全面maskを�
 |---|---|---|
 | react-konva | 固定合成だけにscene graphと追加依存は不要 | native Canvas 2Dの`drawImage`、`destination-in`、`toBlob` |
 | XState | 直列の6状態程度には導入・学習コストが過剰 | 型付き`useReducer`＋純粋な遷移表 |
-| GarmentIQ | PyTorchと複数モデルが必要で、1日MVPの2項目だけには過剰。物理scaleも別途必要 | 50mmマーカー＋OpenCV.js＋利用者補正 |
+| GarmentIQ | PyTorchと複数モデルが必要で、1日MVPの2項目だけには過剰。物理scaleも別途必要 | 撮影後画像AIの4端点＋50mmマーカー＋OpenCV.js＋利用者補正 |
 
 ## 5. ライブ撮影パイプライン
 
@@ -298,7 +300,7 @@ type GuidanceEvent = {
 
 ## 6. 採寸ワークフロー
 
-固定順序と完了条件は次のとおり。
+MVPの採寸対象は、平置きの半袖クルーネックTシャツ1種類に限定する。固定順序と完了条件は次のとおり。
 
 ```text
 1/4 正面を撮影・受理
@@ -313,34 +315,38 @@ type GuidanceEvent = {
 → 背景編集を解放
 ```
 
-採寸写真は出品画像ではなく解析専用である。服を平置きして背面を上にし、シワを伸ばし、無地で服とコントラストがある面へ置く。100%印刷した1辺50mmの正方形マーカーを服と同じ平面の右下へ、服に重ねず配置する。真上から服全体とマーカーが同時に入る1枚を撮る。同じ平面の1枚からscaleを得られるため、着丈と身幅を別々に撮影しない。
+採寸写真は出品画像ではなく解析専用である。Tシャツを平置きして背面を上にし、襟、袖、裾を広げてシワを伸ばし、無地で服とコントラストがある面へ置く。専用マーカーは外形50.0mm角、5mm幅の黒い外枠、40.0mm角の白地からなる二重正方形とし、100%印刷後に定規で外形1辺を確認する。服と同じ平面の右下へ30mm以上離して配置する。真上から服全体とマーカーが同時に入る1枚を撮る。同じ平面の1枚からscaleを得られるため、着丈と身幅を別々に撮影しない。
 
 `MeasurementProcessor`はOpenCV.js Worker内で次を行う。
 
 1. grayscale／threshold／Cannyで候補を抽出する。
-2. contourを四角形近似し、50mmマーカー候補を検証する。
+2. contourを四角形近似し、外形と内形が入れ子になった50mm専用マーカー候補を検証する。
 3. マーカー四隅からhomographyを求め、撮影面を射影補正する。
 4. 補正後のマーカー1辺を5.0cmとしてpx/cmを得る。
 5. マーカーを除いた最大輪郭から服領域を得る。
-6. 背面襟ぐり中央→裾中央を着丈、左右の脇下間を身幅とする初期線を提案する。
+6. 補正済み写真を`MeasurementPointSuggester`へ1回送り、背面襟ぐり中央→裾中央と左右脇下間の4端点を0〜1の正規化座標で得る。
+7. 4端点を補正面へ写像し、着丈と身幅をcmへ換算する。
 
-6は輪郭ベースの**初期提案**であり、意味点の正しさをOpenCV.jsだけで保証しない。`MeasurementReview`が着丈2端点・身幅2端点を画像上に表示し、ドラッグのたびに0.1cm単位で再計算する。初期状態は未承認とし、利用者の明示承認後だけ確定する。マーカー未検出、欠け、衣類との重なり、強い遠近、服全体の欠け、暗さ、ぼけは撮り直し理由を表示する。利用者は撮り直しの代わりに着丈・身幅を手入力できる。
+6は**初期提案**であり、画像AIへcm値を決めさせない。提案失敗時は輪郭上の粗いドラフトまたは利用者の端点配置へ切り替える。`MeasurementReview`が4端点を表示し、ドラッグのたびに0.1cm単位で再計算する。初期状態は未承認とする。手入力でも衣類全体が写った4枚目は必須とし、`approved_cv`と`approved_manual`を区別する。
 
 ```ts
 type MeasurementDraft = {
   imageId: string;
-  marker: {
+  marker?: {
     knownSideCm: 5;
     corners: [Point, Point, Point, Point];
     pxPerCm: number;
   };
   length: { start: Point; end: Point; valueCm: number };
   width: { start: Point; end: Point; valueCm: number };
-  status: "needs_review" | "approved" | "manual";
+  source: "ai" | "contour" | "user";
+  status: "needs_review" | "approved_cv" | "approved_manual";
 };
 ```
 
-デモの受入目標は、代表トップスで利用者が端点を補正・承認した値がメジャー実測に対して着丈・身幅とも±1.0cm以内であること。マーカー印刷倍率、マーカーと服の同一平面、端点補正を前提条件としてUIにも明示する。
+初期検出条件は、マーカー最短辺80px以上、全四隅が画像端から16px超、最短辺／最長辺0.65以上、衣類との画像上の間隔24px以上とする。失敗コードは`MARKER_MISSING|MARKER_MULTIPLE|MARKER_TOO_SMALL|MARKER_OCCLUDED|GARMENT_OUT_OF_FRAME|GARMENT_MARKER_OVERLAP|SEGMENTATION_FAILED|ENDPOINTS_INVALID`に限定する。着丈20〜100cm、身幅20〜80cmの範囲外は警告するが、再確認後は承認可能とする。
+
+デモの受入目標は、代表Tシャツで利用者が端点を補正・承認した値がメジャー実測に対して着丈・身幅とも±1.0cm以内であること。自動ドラフト自体の誤差は成功条件にせず、「ドラフト→補正→承認」または手入力で必ず完走できることを必須とする。
 
 ## 7. API契約
 
@@ -374,7 +380,11 @@ Responses APIの画像入力とstrict JSON Schemaを使い、返却後もruntime
 
 入力: `front`原本。Python FastAPIがrembgへ転送し、mask-only PNGを返す。rembgポートはブラウザから直接呼ばない。
 
-`POST /api/analyze-shot`の`requestedShot`は`front|back|tag`に限定する。採寸はブラウザ内のOpenCV.js Workerで処理し、採寸写真を画像AIへ送らない。
+`POST /api/analyze-shot`の`requestedShot`は`front|back|tag`に限定する。採寸の幾何検証はブラウザ内のOpenCV.js Workerへ分離する。
+
+### `POST /api/suggest-measurement-points`
+
+入力は射影補正済みの採寸写真1枚。出力は`lengthStart`、`lengthEnd`、`widthStart`、`widthEnd`の0〜1正規化座標とconfidenceだけを持つstrict schemaとし、cm値、UI文言、画面遷移を返さない。採寸写真を画像AIへ送るのは撮影後のこの1回だけで、連続映像は送らない。
 
 ## 8. 画像生成・合成
 
@@ -435,6 +445,6 @@ CONNECTING_LIVE → CAPTURE(front) ⇄ LIVE_GUIDANCE
 5. fixture frontをmask-onlyで1回処理し、model sessionをwarmにする。
 6. LiveKit URL／API key／secretとAI provider、rembg疎通を`/api/health`で確認する。
 7. 基準端末からRoomへ接続し、camera track publish、Agent subscribe、`GuidanceEvent` pushを確認する。
-8. 代表トップスで補正・承認後の着丈・身幅がメジャー実測±1.0cm以内であることを確認する。
+8. 代表Tシャツで補正・承認後の着丈・身幅がメジャー実測±1.0cm以内であることを確認する。
 9. 切断・再接続、期限切れevent破棄、Agent停止時の端末内fallbackを確認する。
 10. liveとfixtureの両方で最初から画像保存まで通す。

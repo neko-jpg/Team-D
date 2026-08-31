@@ -1,0 +1,63 @@
+/*
+ * Team-D Mercari research-derived capture tokens.
+ * This is not an official Mercari UI kit. Adapt semantic values to the
+ * current product theme instead of copying this file over an existing theme.
+ */
+
+:root {
+  /* Provenance: official-brand */
+  --capture-brand-red: #ff0211;
+  --capture-brand-blue: #4dc9ff;
+  --capture-brand-black: #222222;
+
+  /* Provenance: observed-product, frozen 2026-08-31 */
+  --capture-action-primary: #ff333f;
+  --capture-action-primary-hover: #ff6574;
+  --capture-action-primary-pressed: #e32b36;
+  --capture-text-primary: #333333;
+  --capture-text-secondary: #666666;
+  --capture-text-link: #0073cc;
+  --capture-surface-primary: #ffffff;
+  --capture-surface-secondary: #f5f5f5;
+  --capture-border-default: #cccccc;
+  --capture-feedback-success: #0aa466;
+  --capture-feedback-success-subtle: #e4ffec;
+
+  /* Project semantics */
+  --capture-camera-panel: rgb(18 18 18 / 78%);
+  --capture-camera-panel-strong: rgb(18 18 18 / 90%);
+  --capture-camera-text: #ffffff;
+  --capture-guide-neutral: rgb(255 255 255 / 70%);
+  --capture-guide-active: #4dc9ff;
+  --capture-guide-ready: #34c97b;
+  --capture-feedback-caution: #ffb035;
+  --capture-feedback-danger: #e32b36;
+  --capture-focus-ring: #0073cc;
+
+  --capture-space-1: 4px;
+  --capture-space-2: 8px;
+  --capture-space-3: 12px;
+  --capture-space-4: 16px;
+  --capture-space-6: 24px;
+  --capture-space-8: 32px;
+
+  --capture-radius-control: 6px;
+  --capture-radius-media: 8px;
+  --capture-radius-panel: 16px;
+  --capture-radius-full: 999px;
+
+  --capture-text-body: 15px;
+  --capture-text-control: 16px;
+  --capture-line-body: 1.4;
+  --capture-font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif;
+
+  --capture-touch-min: 44px;
+  --capture-button-primary-height: 48px;
+  --capture-motion-fast: 180ms;
+  --capture-motion-state: 260ms;
+
+  --capture-safe-top: env(safe-area-inset-top, 0px);
+  --capture-safe-right: env(safe-area-inset-right, 0px);
+  --capture-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --capture-safe-left: env(safe-area-inset-left, 0px);
+}

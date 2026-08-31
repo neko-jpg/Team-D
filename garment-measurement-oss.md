@@ -1,169 +1,76 @@
-# 衣類自動採寸OSS調査
+# 衣類採寸OSSの採用境界
 
 最終更新: 2026-08-31
 
-## 調査対象
-
-- [AI MEASURE - 洋服の自動採寸](https://apps.apple.com/jp/app/ai-measure/id6450348694)
-
-AI MEASUREは、洋服を撮影すると採寸線と寸法が入った画像を自動生成するiOSアプリである。
-トップス、パンツ、スカート、ワンピースなどの採寸と、衣類の背景削除に対応している。
-
 ## 結論
 
-ReactモバイルWebとしてAI MEASUREに近い体験を作る場合、次の構成を候補とする。
-
-1. `GarmentIQ`で衣類分類、背景分離、ランドマーク検出を行う
-2. 自動採寸モデル／APIで実寸値を算出する
-3. 自動検出した測定点をユーザーが確認・修正できるUIにする
-
-`cloth-measure`は衣類の輪郭抽出や測定線UIの参考にはなるが、専用マーカーと撮影板を前提とするため、今回の実装には採用しない。また、READMEにMITと記載されているものの、現在のリポジトリには独立した`LICENSE`ファイルがない。
-
-実装では`GarmentIQ`と`OpenCV.js`を画像処理に利用し、実寸値の取得には別の自動採寸処理を組み合わせる。
-
-## 参考候補: cloth-measure
-
-- リポジトリ: [oliver603-juang/cloth-measure](https://github.com/oliver603-juang/cloth-measure)
-- 主な技術: HTML、JavaScript、OpenCV.js、ArUco
-- 実行環境: スマートフォンを含むWebブラウザ
-- ビルド: 不要。単一の`index.html`で動作
-- ライセンス: READMEではMIT表記。ただし`LICENSE`ファイルなし
-
-### 対応機能
-
-| 対象 | 自動採寸項目 |
-|---|---|
-| 上衣 | 衣丈、胸幅、肩幅、裾幅 |
-| パンツ・下衣 | パンツ丈、腰幅、股上、裾幅 |
-
-### 実装上の特徴
-
-- 衣類が上衣か下衣かを輪郭形状から自動判定する
-- ArUcoマーカーによって撮影画像の縮尺を取得する
-- ホモグラフィによって斜めから撮影した画像を補正する
-- 背景色との差を利用して衣類領域を分離する
-- 衣類の左右対称性から向きと撮影品質を確認する
-- 測定点を画面上でドラッグして修正できる
-- 写真と処理結果は端末内で扱われる
-
-### 今回の企画との相性
-
-今回のReactモバイルWebでは直接採用せず、次の実装要素だけを参考にする。
-
-- 斜め撮影の補正
-- 上衣と下衣の分類
-- 測定線の描画
-- タッチ操作による測定点修正
-- 採寸結果を含む出品情報の生成
-
-### 注意点
-
-- GitHub上のスター数が少なく、実績や保守性は未確認
-- 肩幅は輪郭だけでは安定検出が難しく、推定後の手動確認が必要
-- マーカーや専用の撮影板を用意する必要がある
-- README上のライセンス表記だけでなく、正式な`LICENSE`ファイルを確認する必要がある
-
-## AI・ランドマーク検出: GarmentIQ
-
-- リポジトリ: [lygitdata/GarmentIQ](https://github.com/lygitdata/GarmentIQ)
-- ライセンス: MIT
-- 主な技術: Python、PyTorch、BiRefNet、SAM、HRNet
-
-### 対応機能
-
-- 衣類カテゴリの分類
-- 衣類と背景の分離
-- 衣類ランドマークの検出
-- ランドマークの補正
-- 測定線と測定結果JSONの生成
-- トップス、パンツ、スカート、ベスト、ワンピースなどへの対応
-
-### 制約
-
-GarmentIQが計算する距離は画像上のユークリッド距離であり、そのままではcmではない。
-実寸値は、別途採用する自動採寸モデル／APIまたは端末から取得できる深度情報を使って算出する。GarmentIQは衣類分類、背景分離、測定点検出に利用する。
-
-## Web画像処理: OpenCV.js
-
-- 公式ページ: [OpenCV.js](https://docs.opencv.org/4.x/d5/d10/tutorial_js_root.html)
-- ソースコード: [opencv/opencv](https://github.com/opencv/opencv)
-
-### 利用候補
-
-- 輪郭抽出
-- 射影変換・ホモグラフィ
-- 二値化・マスク処理
-- ピクセル距離の計算
-- ブラウザ内での画像処理
-
-## iPhoneネイティブARの参考
-
-### Ruler
-
-- リポジトリ: [tbxark/Ruler](https://github.com/tbxark/Ruler)
-- ライセンス: MIT
-- 主な技術: Swift、ARKit
-- 機能: AR空間上の長さ・面積測定
-
-衣類の自動認識機能はない。AR空間で測定点を配置するUIと、点間距離の計算方法を参考にできる。
-Swift 4、iOS 11世代の実装であるため、直接利用するより設計参考に向いている。
-
-### ARuler
-
-- リポジトリ: [duzexu/ARuler](https://github.com/duzexu/ARuler)
-- ライセンス: GPL-2.0
-- 主な技術: Swift、ARKit
-- 機能: AR空間上の2点間距離測定、特徴点からの平面推定
-
-GPL-2.0であるため、MIT系OSSよりも利用条件に注意が必要である。
-
-## 採用しない候補
-
-### Shaku Garment Measurement
-
-- リポジトリ: [shakuai/Garment-Measurement](https://github.com/shakuai/Garment-Measurement)
-
-Tシャツの丈、胸幅、腰幅などを自動採寸する機能を掲げている。しかし、公開リポジトリの実装は外部APIを呼び出すクライアントコードが中心で、採寸モデルやバックエンド本体は公開されていない。そのため、今回のOSS実装候補にはしない。
-
-### AI MEASUREの公開リポジトリ
-
-- リポジトリ: [riamitsu/aimeasure_public](https://github.com/riamitsu/aimeasure_public)
-
-公開されているのはWebページとプライバシーポリシーであり、AI MEASUREアプリ本体のソースコードは含まれていない。
-
-## 推奨構成
-
-### 2日間のハッカソン向け
+1日MVPでは、採寸対象を**平置きの半袖クルーネックTシャツ**、項目を**着丈・身幅**に限定する。撮影は正面・背面・タグの後に、解析専用の採寸写真を1枚追加する。
 
 ```text
-ReactモバイルWeb
-  ├─ eKYC型の撮影ガイド
-  ├─ OpenCV.js
-  │    ├─ 衣類輪郭の抽出
-  │    ├─ 傾き補正
-  │    └─ 撮影品質の確認
-  ├─ GarmentIQ API
-  │    ├─ 衣類分類
-  │    ├─ 背景分離
-  │    └─ 測定点検出
-  ├─ 自動採寸モデル／API
-  │    └─ 実寸値の算出
-  └─ Canvas UI
-       ├─ 測定線表示
-       ├─ 測定点の手動修正
-       └─ 採寸結果の承認
+1/4 正面 → 2/4 背面 → 3/4 タグ
+→ 採寸準備 → 4/4 採寸
+→ 4端点を補正・承認
+→ 背景編集
 ```
 
-### 実装優先順位
+採寸は次の分担で実装する。
 
-1. 平置きTシャツの撮影条件を案内する
-2. Tシャツの身幅と着丈だけを対象にする
-3. 測定点を自動提案する
-4. 自動採寸処理から実寸値を取得する
-5. ユーザーが測定線と数値を修正・承認する
-6. 精度を確認してから肩幅やパンツに拡張する
+| 担当 | 役割 |
+|---|---|
+| OpenCV.js | 50mm専用マーカー検出、射影補正、px/cm換算、4端点間の距離計算 |
+| 撮影後画像AI | 補正済み写真から襟ぐり中央、裾中央、左右脇下の4端点だけを0〜1座標で提案 |
+| 利用者 | 4端点をドラッグ補正し、着丈・身幅を明示承認。失敗時は手入力 |
 
-## 判断
+画像AIはcm値を返さない。OpenCV.jsだけでは「襟ぐり中央」「脇下」の意味を安定して識別できないため、輪郭だけの完全自動採寸を成功条件にしない。
 
-完全自動を最初から目指すより、AIが測定点を提案し、ユーザーが確認する半自動方式が現実的である。
-ハッカソンでは、対象を平置きTシャツの身幅・着丈に限定し、自動採寸処理が返した測定線と数値をユーザーが確認する構成を推奨する。
+## 採用: OpenCV.js
+
+- 公式docs: [OpenCV.js](https://docs.opencv.org/4.x/d5/d10/tutorial_js_root.html)
+- source: [opencv/opencv](https://github.com/opencv/opencv)
+- license: Apache-2.0
+- 導入: 実装開始時の公式stable OpenCV.js／WASMをURL・checksum固定し、Web Workerで実行
+
+使うAPI:
+
+- `cvtColor`、threshold／Canny
+- `findContours`、`approxPolyDP`、`contourArea`
+- `getPerspectiveTransform`、`warpPerspective`
+- 点間距離と座標変換
+
+使わない部分:
+
+- DNN／学習済みモデル
+- ArUcoなど配布buildに含まれる保証がないmodule
+- native Python／server API
+- camera UI、汎用衣類分類
+- OpenCVの結果だけによる採寸確定
+
+## 専用マーカー
+
+ArUcoではなく、外形50.0mm角、5mm黒枠、内側40.0mm角の白地からなる二重正方形を使う。100%倍率で印刷し、撮影前に定規で外形1辺を確認する。衣類と同じ平面の右下へ30mm以上離して置く。
+
+初期受入条件:
+
+- マーカー最短辺80px以上
+- 全四隅が画像端から16px超
+- 最短辺／最長辺0.65以上
+- 衣類との画像上の間隔24px以上
+- 衣類とマーカーの全体が画角内
+
+## 採用しないOSS
+
+| OSS | 判断 | 代替 |
+|---|---|---|
+| [GarmentIQ](https://github.com/lygitdata/GarmentIQ) | PyTorchと複数モデルが1日MVPには過剰。画像上の距離をcmへするscaleも別途必要 | 画像AIの4端点＋OpenCV.js＋利用者補正 |
+| [cloth-measure](https://github.com/oliver603-juang/cloth-measure) | 実装アイデアは近いが、READMEのMIT表記に対して独立LICENSEがなく、ArUco／専用撮影板前提 | 公式OpenCV.js APIだけで専用マーカー処理を新規実装 |
+| [Shaku Garment Measurement](https://github.com/shakuai/Garment-Measurement) | 公開部分は外部API client中心で、採寸backend／modelがない | 採用しない |
+| [AI MEASURE公開repo](https://github.com/riamitsu/aimeasure_public) | アプリ本体の実装を含まない | UX参考のみ |
+| ARKit系Ruler | iOS nativeでWeb MVPへ直接流用できない | 固定2Dガイド＋平面マーカー |
+
+## MVP成功条件
+
+- 4枚目の採寸写真を省略できない。
+- 3枚が揃っただけでは背景編集へ進めない。
+- `approved_cv`または`approved_manual`になって初めて撮影・採寸完了とする。
+- 自動線の正解ではなく、「ドラフト→補正→承認」または手入力で完走できることを必須とする。
+- 代表Tシャツでは、補正・承認後の着丈・身幅がメジャー実測±1.0cm以内を目標とする。
