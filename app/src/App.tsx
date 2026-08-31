@@ -32,6 +32,7 @@ import {
   type FixtureOutcome,
   type ShotAssessor,
 } from "./providers";
+import { CameraPreview } from "./camera";
 
 const SHOT_TYPES = ["front", "back", "tag"] as const satisfies
   readonly CaptureShotType[];
@@ -293,6 +294,8 @@ export function App(): ReactElement {
                 {currentCaptureSlot}
               </span>
             </div>
+
+            <CameraPreview />
 
             <div className="upload-panel">
               <div className="upload-icon" aria-hidden="true">＋</div>
