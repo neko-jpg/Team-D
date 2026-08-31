@@ -21,6 +21,11 @@ from .measurement_line import (
     ResponsesMeasurementLineProvider,
     validate_measurement_endpoints,
 )
+from .measurement_line_factory import (
+    FixtureMeasurementLineProvider,
+    LiveMeasurementLineProviderUnavailable,
+    create_measurement_line_provider,
+)
 from .runtime import (
     FixtureVisionGuidanceProvider,
     LiveAnalyzer,
@@ -56,6 +61,7 @@ __all__ = [
     "AssessmentImage",
     "EncodedImage",
     "FixtureShotAssessor",
+    "FixtureMeasurementLineProvider",
     "FixtureVisionGuidanceProvider",
     "GarmentMask",
     "GarmentMaskContractError",
@@ -69,6 +75,7 @@ __all__ = [
     "GuidanceInput",
     "GuidanceShot",
     "LiveAnalyzer",
+    "LiveMeasurementLineProviderUnavailable",
     "LiveVisionGuidanceProvider",
     "MEASUREMENT_LINE_JSON_SCHEMA",
     "MeasurementEndpoints",
@@ -88,6 +95,7 @@ __all__ = [
     "VisionDecision",
     "VisionGuidanceProvider",
     "create_provider_inference",
+    "create_measurement_line_provider",
     "create_shot_assessor",
     "create_vision_guidance_provider",
     "guidance_input_from_frame",

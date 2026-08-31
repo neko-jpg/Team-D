@@ -35,9 +35,9 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 2.1 【ともちゃん】`MeasurementLineProvider`の入力・出力契約を`backend/**`へ実装する。射影補正済みmeasurement画像1枚を受け、`lengthStart|lengthEnd|widthStart|widthEnd`の0〜1正規化座標だけをstrict schemaで返す。cm値、UI文言、画面遷移、未知field、欠落、範囲外座標、`NaN`／`Infinity`を拒否する。
 
-- [ ] 2.2 【健太】FastAPIの`POST /api/suggest-measurement-points`を`backend/**`へ実装し、`MeasurementLineProvider`をdependencyとして接続する。画像入力、timeout、provider error、schema不正を検証し、失敗をfixture成功へ自動変換しない。
+- [x] 2.2 【健太】FastAPIの`POST /api/suggest-measurement-points`を`backend/**`へ実装し、`MeasurementLineProvider`をdependencyとして接続する。画像入力、timeout、provider error、schema不正を検証し、失敗をfixture成功へ自動変換しない。
 
-- [ ] 2.3 【健太】正常な4端点、未知field、欠落、範囲外／非有限座標、timeoutを検証するcontract／APIテストを`backend/tests/**`へ追加する。
+- [x] 2.3 【健太】正常な4端点、未知field、欠落、範囲外／非有限座標、timeoutを検証するcontract／APIテストを`backend/tests/**`へ追加する。
 
 ## 3. 正面mask API（元タスク6.2）
 
