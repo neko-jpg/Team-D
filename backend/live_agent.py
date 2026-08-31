@@ -19,11 +19,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import threading
 from collections.abc import AsyncIterable, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Generic, Literal, Optional, TypeVar
+
+from .config import BackendSettings
 
 
 FrameT = TypeVar("FrameT")
@@ -901,6 +904,13 @@ def create_agent_server(
 
 def main() -> None:
     """Run the worker through the LiveKit Agents CLI."""
+
+    settings = BackendSettings.from_env()
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("backend.agent").info(
+        "agent_starting provider_mode=%s provider_schema=VisionGuidanceProvider",
+        settings.provider_mode,
+    )
 
     try:
         from livekit.agents import cli  # type: ignore[import-not-found]
