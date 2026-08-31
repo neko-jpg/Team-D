@@ -82,7 +82,7 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 ## 完了条件
 
 - [ ] 【ともちゃん】フェーズ1〜5のprovider、FastAPI、Agent transport、外部送信境界が`backend/**`だけで実装され、live失敗がfixture成功へ自動変換されないことを確認する。
-- [ ] 【健太】`.venv/bin/python -m pytest -q backend/tests`を実行し、フェーズ1〜5で抽出したバックエンド部分の正常系・異常系がすべて成功することを確認する。
+- [x] 【健太】`.venv/bin/python -m pytest -q backend/tests`を実行し、フェーズ1〜5で抽出したバックエンド部分の正常系・異常系がすべて成功することを確認する。
 
 ## 抽出対象外とした未完了タスク
 
