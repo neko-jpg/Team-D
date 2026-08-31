@@ -49,9 +49,9 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 ## 4. 背景生成provider（元タスク6.3、元タスク6.4のバックエンド部分）
 
-- [ ] 4.1 【ともちゃん】`BackgroundGenerator`を`backend/**`へ実装する。許可されたstyle IDだけを「空の撮影背景、真上視点、均一照明、人物・衣類・ハンガー・文字・ロゴなし」の固定promptへ変換し、外部providerへテキストだけを送る。60秒timeout、provider error、decode不能または利用不能な生成画像を明示的な失敗として扱う。
+- [x] 4.1 【ともちゃん】`BackgroundGenerator`を`backend/**`へ実装する。許可されたstyle IDだけを「空の撮影背景、真上視点、均一照明、人物・衣類・ハンガー・文字・ロゴなし」の固定promptへ変換し、外部providerへテキストだけを送る。60秒timeout、provider error、decode不能または利用不能な生成画像を明示的な失敗として扱う。
 
-- [ ] 4.2 【健太】`BackgroundGenerator`の決定的fixtureとrequest spyテストを`backend/tests/**`へ追加する。送信bodyに商品画像、mask、tag、measurement、binary fieldが含まれず、未知style ID、timeout、provider error、decode不能または利用不能画像が拒否されることを確認する。
+- [x] 4.2 【健太】`BackgroundGenerator`の決定的fixtureとrequest spyテストを`backend/tests/**`へ追加する。送信bodyに商品画像、mask、tag、measurement、binary fieldが含まれず、未知style ID、timeout、provider error、decode不能または利用不能画像が拒否されることを確認する。
 
 ## 5. LiveKit Agent連携・バックエンド統合検証
 
