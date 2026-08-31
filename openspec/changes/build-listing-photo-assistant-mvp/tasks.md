@@ -26,9 +26,9 @@
 * [ ] 2.2 【健太さん】document-autocaptureの`DEFAULT_VIDEO_CONSTRAINTS`、`start()`、`ensureVideoPlayback()`、`cleanupVideoStream()`を限定移植し、背面カメラ起動、権限拒否、track解放を実機で確認する
 * [x] 2.3 【徹平さん】`scheduleNextFrame()`のrVFC→rAF→timerパターンを4Hz・同時解析1へ変更して実装し、中間フレームを蓄積しないテストを通す
 * [x] 2.4 【友ちゃんさん】固定ガイドを`object-fit`を考慮して映像PixelRoiへ変換する仕様と入出力を定義する
-* [ ] 2.5 【健太さん】PixelRoi変換の純粋関数を実装し、縦横比とクロップのfixtureテストを通す
+* [x] 2.5 【健太さん】PixelRoi変換の純粋関数を実装し、縦横比とクロップのfixtureテストを通す
 * [x] 2.6 【友ちゃんさん】document-autocaptureの`rgbaToGrayscale()`、`brightnessCheck()`、`laplacianVariance()`の採用基準と閾値方針を決める
-* [ ] 2.7 【健太さん】上記画像品質判定を出典付きで限定移植し、暗い／明るい／ぼけたfixtureの判定テストを通す
+* [x] 2.7 【健太さん】上記画像品質判定を出典付きで限定移植し、暗い／明るい／ぼけたfixtureの判定テストを通す
 * [x] 2.8 【友ちゃんさん】Quadベースの`StabilityTracker`を使わず、連続ROIのframe-differenceで600ms安定を見る方式を確定する
 * [x] 2.9 【徹平さん】frame-difference trackerを実装し、600ms安定と移動時resetのテストを通す
 * [ ] 2.10 【健太さん】front／back用固定衣類ガイドとtag用矩形をvideo上へ表示し、raw撮影Blobにoverlayが含まれず、`READY`以外でも撮影できることを確認する
