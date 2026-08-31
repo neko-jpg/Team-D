@@ -166,6 +166,12 @@ export function App({
   );
 
   useEffect(() => {
+    if (isCaptureShot(state.currentStep)) {
+      setFixtureShot(state.currentStep);
+    }
+  }, [state.currentStep]);
+
+  useEffect(() => {
     const urls = objectUrls.current;
     return () => {
       urls.forEach(revokeUploadObjectUrl);
@@ -174,39 +180,40 @@ export function App({
   }, []);
 
   const runAssessment = useCallback(
-    (
+    async (
       provider: ShotAssessor,
       slot: CaptureShotType,
       blob: Blob,
       requestId: string,
       acceptedShots: readonly CaptureShotType[],
-    ) => {
-      void provider
-        .assess({
+    ): Promise<void> => {
+      try {
+        const result = await provider.assess({
           blob,
           requestedShot: slot,
           acceptedShots,
-        })
-        .then((result) => {
-          const assessment = ShotAssessmentSchema.parse(result);
-          dispatch(captureActions.shotAssessed(slot, assessment, requestId));
-        })
-        .catch((error: unknown) => {
-          dispatch(
-            captureActions.providerError(
-              slot,
-              normalizeProviderError(error),
-              requestId,
-            ),
-          );
         });
+        const assessment = ShotAssessmentSchema.parse(result);
+        dispatch(captureActions.shotAssessed(slot, assessment, requestId));
+      } catch (error: unknown) {
+        dispatch(
+          captureActions.providerError(
+            slot,
+            normalizeProviderError(error),
+            requestId,
+          ),
+        );
+      }
     },
     [dispatch],
   );
 
   const submitImage = useCallback(
-    (blob: Blob): void => {
-      if (!isCaptureShot(state.currentStep)) {
+    async (blob: Blob): Promise<void> => {
+      if (
+        state.status !== "capturing" ||
+        !isCaptureShot(state.currentStep)
+      ) {
         return;
       }
 
@@ -219,9 +226,16 @@ export function App({
       );
 
       dispatch(captureActions.submitCapture(slot, blob, objectUrl, requestId));
-      runAssessment(assessor, slot, blob, requestId, acceptedShots);
+      await runAssessment(assessor, slot, blob, requestId, acceptedShots);
     },
-    [assessor, dispatch, runAssessment, state.currentStep, state.slots],
+    [
+      assessor,
+      dispatch,
+      runAssessment,
+      state.currentStep,
+      state.slots,
+      state.status,
+    ],
   );
 
   const handleUpload = (event: ChangeEvent<HTMLInputElement>): void => {
@@ -232,7 +246,7 @@ export function App({
       return;
     }
 
-    submitImage(file);
+    void submitImage(file);
   };
 
   const handleRetryAnalysis = (): void => {
@@ -246,7 +260,7 @@ export function App({
       (acceptedSlot) => state.slots[acceptedSlot] !== null,
     );
     dispatch(captureActions.retryAnalysis(requestId));
-    runAssessment(
+    void runAssessment(
       assessor,
       pendingCapture.slot,
       pendingCapture.blob,

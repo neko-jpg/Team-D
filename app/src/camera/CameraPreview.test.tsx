@@ -262,6 +262,46 @@ describe("CameraPreview", () => {
     expect(shutter(container).disabled).toBe(false);
   });
 
+  it("keeps the shutter blocked until post-capture validation finishes", async () => {
+    const session = createSession();
+    const rawBlob = new Blob(["raw frame"], { type: "image/jpeg" });
+    const captureFrame = vi.fn(async () => rawBlob);
+    let finishValidation: (() => void) | undefined;
+    const onCapture = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishValidation = resolve;
+        }),
+    );
+    const container = renderPreview(session, { captureFrame, onCapture });
+
+    await clickStart(container);
+
+    await act(async () => {
+      shutter(container).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(shutter(container).disabled).toBe(true);
+    act(() => {
+      shutter(container).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    expect(captureFrame).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishValidation?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCapture).toHaveBeenCalledWith(rawBlob);
+    expect(shutter(container).disabled).toBe(false);
+  });
+
   it("keeps the camera usable after a frame capture error", async () => {
     const session = createSession();
     const captureFrame = vi.fn(async () => {
