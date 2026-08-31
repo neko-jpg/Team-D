@@ -32,7 +32,12 @@ import {
   type FixtureOutcome,
   type ShotAssessor,
 } from "./providers";
-import { CameraPreview } from "./camera";
+import {
+  CameraPreview,
+  type CameraControllerFactory,
+  type LocalAnalysisSupportCheck,
+  type RawFrameCapture,
+} from "./camera";
 
 const SHOT_TYPES = ["front", "back", "tag"] as const satisfies
   readonly CaptureShotType[];
@@ -63,14 +68,14 @@ function isCaptureShot(value: CaptureState["currentStep"]): value is CaptureShot
   return value === "front" || value === "back" || value === "tag";
 }
 
-function createUploadObjectUrl(file: File): string {
+function createCaptureObjectUrl(blob: Blob, slot: CaptureShotType): string {
   if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
-    return URL.createObjectURL(file);
+    return URL.createObjectURL(blob);
   }
 
   // jsdom does not provide createObjectURL. The browser path above is always
   // used in the app; this non-empty fallback keeps reducer tests deterministic.
-  return `blob:capture-${file.name}-${file.size}-${file.lastModified}`;
+  return `blob:capture-${slot}-${blob.size}`;
 }
 
 function revokeUploadObjectUrl(url: string): void {
@@ -129,7 +134,17 @@ function assessmentMessage(
   return "この写真は受け付けられません。撮り直してください。";
 }
 
-export function App(): ReactElement {
+export interface AppProps {
+  readonly captureFrame?: RawFrameCapture;
+  readonly checkLocalAnalysisSupport?: LocalAnalysisSupportCheck;
+  readonly createCameraController?: CameraControllerFactory;
+}
+
+export function App({
+  captureFrame,
+  checkLocalAnalysisSupport,
+  createCameraController,
+}: AppProps = {}): ReactElement {
   const [state, reducerDispatch] = useReducer(
     captureReducer,
     initialCaptureState,
@@ -138,6 +153,10 @@ export function App(): ReactElement {
   const [fixtureOutcome, setFixtureOutcome] = useState<FixtureOutcome>("ok");
   const [editStarted, setEditStarted] = useState(false);
   const objectUrls = useRef(new Set<string>());
+  const stateRef = useRef(state);
+  const submissionInFlightRef = useRef(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  stateRef.current = state;
 
   const dispatch = useCallback(
     (action: CaptureAction) => reducerDispatch(action),
@@ -156,6 +175,12 @@ export function App(): ReactElement {
       urls.clear();
     };
   }, []);
+
+  useEffect(() => {
+    if (state.status === "capturing") {
+      submissionInFlightRef.current = false;
+    }
+  }, [state.currentStep, state.status]);
 
   const runAssessment = useCallback(
     (
@@ -188,26 +213,42 @@ export function App(): ReactElement {
     [dispatch],
   );
 
+  const submitCaptureBlob = useCallback(
+    (slot: CaptureShotType, blob: Blob): boolean => {
+      const currentState = stateRef.current;
+      if (
+        currentState.currentStep !== slot ||
+        currentState.status !== "capturing" ||
+        submissionInFlightRef.current
+      ) {
+        return false;
+      }
+
+      submissionInFlightRef.current = true;
+      const objectUrl = createCaptureObjectUrl(blob, slot);
+      objectUrls.current.add(objectUrl);
+      const requestId = createCaptureRequestId();
+      const acceptedShots = SHOT_TYPES.filter(
+        (acceptedSlot) => currentState.slots[acceptedSlot] !== null,
+      );
+
+      dispatch(captureActions.submitCapture(slot, blob, objectUrl, requestId));
+      runAssessment(assessor, slot, blob, requestId, acceptedShots);
+      return true;
+    },
+    [assessor, dispatch, runAssessment],
+  );
+
   const handleUpload = (event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.target.files?.[0];
     event.target.value = "";
+    const currentStep = stateRef.current.currentStep;
 
-    if (file === undefined || !isCaptureShot(state.currentStep)) {
+    if (file === undefined || !isCaptureShot(currentStep)) {
       return;
     }
 
-    const slot = state.currentStep;
-    const objectUrl = createUploadObjectUrl(file);
-    objectUrls.current.add(objectUrl);
-    const requestId = createCaptureRequestId();
-    const acceptedShots = SHOT_TYPES.filter(
-      (acceptedSlot) => state.slots[acceptedSlot] !== null,
-    );
-
-    dispatch(
-      captureActions.submitCapture(slot, file, objectUrl, requestId),
-    );
-    runAssessment(assessor, slot, file, requestId, acceptedShots);
+    submitCaptureBlob(currentStep, file);
   };
 
   const handleRetryAnalysis = (): void => {
@@ -295,19 +336,32 @@ export function App(): ReactElement {
               </span>
             </div>
 
-            <CameraPreview />
+            <CameraPreview
+              captureBusy={state.status !== "capturing"}
+              captureFrame={captureFrame}
+              checkLocalAnalysisSupport={checkLocalAnalysisSupport}
+              createController={createCameraController}
+              currentShot={currentCaptureSlot}
+              onCapture={({ blob, shot }) => submitCaptureBlob(shot, blob)}
+              onRequestUpload={() => uploadInputRef.current?.click()}
+            />
 
             <div className="upload-panel">
               <div className="upload-icon" aria-hidden="true">＋</div>
               <strong>写真をアップロード</strong>
               <span>端末の画像を選ぶだけで自動確認します</span>
-              <label className="upload-button">
+              <label
+                aria-disabled={state.status !== "capturing"}
+                className={`upload-button ${state.status !== "capturing" ? "is-disabled" : ""}`}
+              >
                 <span>画像を選ぶ</span>
                 <input
                   accept="image/*"
                   aria-label={`${SHOT_LABELS[currentCaptureSlot]}画像をアップロード`}
                   data-testid="upload-input"
+                  disabled={state.status !== "capturing"}
                   onChange={handleUpload}
+                  ref={uploadInputRef}
                   type="file"
                 />
               </label>
@@ -355,7 +409,7 @@ export function App(): ReactElement {
             </div>
 
             <p className="helper-text">
-              撮影前の状態にかかわらず、手動アップロードはいつでも使えます。
+              ライブ判定がREADYでなくても、手動撮影とアップロードを使えます。
             </p>
 
             {state.status === "analyzing" ? (

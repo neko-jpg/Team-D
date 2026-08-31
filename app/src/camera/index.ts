@@ -3,6 +3,28 @@ export type {
   CameraControllerFactory,
   CameraPreviewProps,
 } from "./CameraPreview";
+export { CAPTURE_GUIDES, CaptureGuide } from "./CaptureGuide";
+export type {
+  CaptureGuideProps,
+  NormalizedCaptureGuide,
+} from "./CaptureGuide";
+export { supportsLocalAnalysis } from "./localAnalysisSupport";
+export type {
+  LocalAnalysisSupportCheck,
+  LocalAnalysisSupportRuntime,
+} from "./localAnalysisSupport";
+export {
+  captureRawVideoFrame,
+  RAW_CAPTURE_MIME_TYPE,
+  RAW_CAPTURE_QUALITY,
+} from "./rawCapture";
+export type {
+  CaptureCanvasFactory,
+  ImageCaptureFactory,
+  RawCaptureOptions,
+  RawFrameCapture,
+  StillImageCapture,
+} from "./rawCapture";
 export {
   CameraController,
   CameraStartError,

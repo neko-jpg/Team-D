@@ -31,9 +31,9 @@
 * [x] 2.7 【健太さん】上記画像品質判定を出典付きで限定移植し、暗い／明るい／ぼけたfixtureの判定テストを通す
 * [x] 2.8 【友ちゃんさん】Quadベースの`StabilityTracker`を使わず、連続ROIのframe-differenceで600ms安定を見る方式を確定する
 * [x] 2.9 【徹平さん】frame-difference trackerを実装し、600ms安定と移動時resetのテストを通す
-* [ ] 2.10 【健太さん】front／back用固定衣類ガイドとtag用矩形をvideo上へ表示し、raw撮影Blobにoverlayが含まれず、`READY`以外でも撮影できることを確認する
+* [x] 2.10 【健太さん】front／back用固定衣類ガイドとtag用矩形をvideo上へ表示し、raw撮影Blobにoverlayが含まれず、`READY`以外でも撮影できることを確認する
 * [x] 2.11 【友ちゃんさん】Worker／Canvas解析不可時の固定ガイド＋手動撮影、カメラ権限拒否時のfile upload fallbackを仕様として確定する
-* [ ] 2.12 【健太さん】各fallbackが実際に動くことを確認する
+* [x] 2.12 【健太さん】各fallbackが実際に動くことを確認する
 
 ## 3. 既存capture coreのLiveKit・4slot拡張
 

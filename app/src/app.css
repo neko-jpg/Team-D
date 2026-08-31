@@ -279,6 +279,11 @@ h2 {
   clip-path: inset(50%);
 }
 
+.upload-button.is-disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .fixture-controls {
   display: grid;
   gap: 9px;

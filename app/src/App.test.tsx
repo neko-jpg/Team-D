@@ -2,7 +2,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import App from "./App";
+import App, { type AppProps } from "./App";
+import {
+  CameraStartError,
+  type CameraSession,
+} from "./camera";
 import { FixtureShotAssessor } from "./providers/fixtureShotAssessor";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -52,15 +56,49 @@ afterEach(() => {
   }
 });
 
-function renderApp(): HTMLElement {
+function renderApp(props: AppProps = {}): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(<App />);
+    root.render(<App {...props} />);
   });
   return container;
+}
+
+function createCameraSession(
+  start: () => Promise<void> = async () => undefined,
+): CameraSession {
+  let running = false;
+  return {
+    currentStream: undefined,
+    currentVideoTrack: undefined,
+    get isRunning() {
+      return running;
+    },
+    start: vi.fn(async () => {
+      await start();
+      running = true;
+    }),
+    stop: vi.fn(() => {
+      running = false;
+    }),
+  };
+}
+
+async function clickCameraStart(container: HTMLElement): Promise<void> {
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("カメラを起動"),
+  );
+  if (button === undefined) {
+    throw new Error("camera start button is not rendered");
+  }
+
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
 }
 
 function selectValue(
@@ -127,6 +165,62 @@ describe("FixtureShotAssessor", () => {
 });
 
 describe("capture upload vertical slice", () => {
+  it("sends a manual camera Blob through the same assessor flow", async () => {
+    const blob = new Blob(["front-camera"], { type: "image/jpeg" });
+    const captureFrame = vi.fn(async () => blob);
+    const session = createCameraSession();
+    const container = renderApp({
+      captureFrame,
+      checkLocalAnalysisSupport: () => true,
+      createCameraController: () => session,
+    });
+
+    await clickCameraStart(container);
+    const shutter = container.querySelector<HTMLButtonElement>(
+      '[data-testid="manual-shutter"]',
+    );
+    expect(shutter?.disabled).toBe(false);
+
+    await act(async () => {
+      shutter?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captureFrame).toHaveBeenCalledWith(container.querySelector("video"));
+    expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent)
+      .toBe("back");
+    expect(container.querySelector('[data-testid="progress-front"]')?.textContent)
+      .toContain("完了");
+  });
+
+  it("continues the same upload flow after camera permission is denied", async () => {
+    const session = createCameraSession(async () => {
+      throw new CameraStartError(
+        "permission-denied",
+        "Camera permission was denied.",
+      );
+    });
+    const container = renderApp({
+      createCameraController: () => session,
+    });
+
+    await clickCameraStart(container);
+    expect(container.querySelector('[data-testid="camera-status"]')?.textContent)
+      .toBe("権限が必要");
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent)
+      .toBe("front");
+
+    await upload(container, "front-after-denial.png");
+
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent)
+      .toBe("back");
+    expect(container.querySelector('[data-testid="progress-front"]')?.textContent)
+      .toContain("完了");
+  });
+
   it("keeps the edit entry hidden until front, back, and tag are accepted", async () => {
     const container = renderApp();
 
