@@ -39,7 +39,7 @@
 
 - [ ] 3.1 【友ちゃんさん】LiveKit project、Room、browser participant、Python Agent用の環境変数と最小接続手順を用意し、同じRoomのparticipant一覧と両側ログでbrowserとAgentの一意なidentityを確認する
 - [x] 3.2 【友ちゃんさん・健太さん】LiveKit Agents／Python SDKとLiveKit JS SDKの互換性があるstable versionをPython／npm lockfileへ固定し、clean installとSDK importを成功させ、製品名、version、URL、license／noticeを`THIRD_PARTY_NOTICES.md`の固定値と照合する
-- [ ] 3.3 【友ちゃんさん・健太さん】完了済みNode.js API scaffoldの`/api/health`契約を保ったまま、FastAPI serverとLiveKit Agent workerがprovider schemaと設定を共有するPython packageへbackendを移行し、ルートからfixture／liveを起動してfrontend build、Python import、health response、Agent起動ログを確認する
+- [x] 3.3 【友ちゃんさん・健太さん】完了済みNode.js API scaffoldの`/api/health`契約を保ったまま、FastAPI serverとLiveKit Agent workerがprovider schemaと設定を共有するPython packageへbackendを移行し、ルートからfixture／liveを起動してfrontend build、Python import、health response、Agent起動ログを確認する
 - [x] 3.4 【友ちゃんさん】既存のfront／back／tag契約を、`GuidanceEvent`、measurementを含む4slot、正規化4端点、`MeasurementDraft`／`ApprovedMeasurement`、接続状態、provider errorへ後方互換に拡張し、未知値、欠落、非有限値、範囲外座標、measurementを含む`ShotAssessment`を拒否する契約テストを通す
 - [ ] 3.5 【徹平さん】既存`CaptureReducer`を、工程、撮影phase、接続状態を分離した`front→back→tag→measurement準備→measurement撮影→採寸確認・承認→edit`へ拡張し、受理済み4slotと`approved_cv|approved_manual`からだけ次stepを導出して、撮り直し、再接続、不正なAI `nextAction`、古い`requestId`で別slotや採寸状態が変わらないReducerテストを通す
 - [ ] 3.6 【徹平さん・健太さん】既存upload fixture縦スライスを`1/4 正面→2/4 背面→3/4 タグ→4/4 採寸`へ拡張し、4枚の保持後も採寸が`needs_review`なら編集開始を無効にし、測定線と数値の明示承認後だけeditへ進むUI統合テストを通す

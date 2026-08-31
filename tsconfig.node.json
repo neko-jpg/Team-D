@@ -4,5 +4,5 @@
     "lib": ["ES2022"],
     "types": ["node", "vitest/globals"]
   },
-  "include": ["server", "vite.config.ts"]
+  "include": ["vite.config.ts", "app/vite.config.ts", "app/vitest.config.ts"]
 }

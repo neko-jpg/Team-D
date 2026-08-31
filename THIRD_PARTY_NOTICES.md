@@ -44,7 +44,7 @@ SOFTWARE.
 - NOTICE: A `NOTICE` file is distributed at this tag
   (https://github.com/livekit/client-sdk-js/blob/v2.22.1/NOTICE) and is
   reproduced below.
-- Usage: Runtime dependency used from the browser for Room connect, backend
+- Usage: Runtime dependency used from the browser for Room connect, browser
   camera track publish, and data-channel / connection-event subscription.
   Not used for anything beyond LiveKit's own transport boundary — AR overlay
   rendering, capture-state reduction, and discarding of expired or
@@ -111,7 +111,7 @@ limitations under the License.
 
 Apache License 2.0 — see [Apache License 2.0](#apache-license-20) below.
 
-## livekit (LiveKit Python SDK, core rtc/api)
+## livekit (LiveKit Python SDK, core RTC)
 
 - Source: https://github.com/livekit/python-sdks
 - Commit: `3bad29d5957a988ebc53df16efd669f9f8a3c98c` (tag `rtc-v1.1.15`)
@@ -119,9 +119,9 @@ Apache License 2.0 — see [Apache License 2.0](#apache-license-20) below.
 - NOTICE: A `NOTICE` file is distributed at this tag
   (https://github.com/livekit/python-sdks/blob/rtc-v1.1.15/NOTICE) and is
   reproduced below.
-- Usage: Core Python SDK (`rtc` and `api` bindings) that `livekit-agents`
-  depends on for Room/participant/track primitives; not invoked directly by
-  this project's own code beyond what `livekit-agents` exercises. Pinned to
+- Usage: Core Python RTC SDK used for Room/participant/track primitives and
+  camera-only video stream subscription, and also required by
+  `livekit-agents`. Pinned to
   1.1.15 rather than its own latest 1.1.16 because `livekit-agents==1.7.1`
   pins `livekit==1.1.15` exactly in its own package metadata, so the
   dependency resolver produces 1.1.15 for any project depending on
@@ -150,10 +150,44 @@ limitations under the License.
 
 Apache License 2.0 — see [Apache License 2.0](#apache-license-20) below.
 
+## livekit-api (LiveKit Server API SDK, Python)
+
+- Source: https://github.com/livekit/python-sdks
+- Commit: `cb18f19d12e2c25d545893d755cf56f40110f771` (tag `api-v1.2.1`)
+- Version: `1.2.1`
+- NOTICE: The repository-level `NOTICE` file is distributed at this tag
+  (https://github.com/livekit/python-sdks/blob/api-v1.2.1/NOTICE) and is
+  reproduced below.
+- Usage: Server-only dependency used by the FastAPI backend to create
+  short-lived, camera-only browser access tokens. The API key and secret are
+  never included in browser responses or bundles.
+
+### NOTICE contents
+
+```
+Copyright 2023 LiveKit, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
+### License
+
+Apache License 2.0 — see [Apache License 2.0](#apache-license-20) below.
+
 ## Apache License 2.0
 
 The following full license text applies to `livekit-client`, `livekit-agents`,
-and `livekit` as referenced above.
+`livekit`, and `livekit-api` as referenced above.
 
 ```
                                  Apache License

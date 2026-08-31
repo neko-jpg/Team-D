@@ -1,2 +1,0 @@
--r requirements-backend.txt
-pytest==8.4.1

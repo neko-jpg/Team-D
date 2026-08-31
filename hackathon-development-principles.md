@@ -30,9 +30,9 @@ AIから撮影内容と次の行動が返る
 
 アプリはReact + TypeScript + Viteで構築するモバイルWebとし、iPhoneやAndroidのブラウザから利用する。ネイティブアプリのビルドや配布は行わない。
 
-画像AIや背景分離との接続には、ローカルで動作する必要最小限のNode.js APIを使用する。フロントエンドからはViteの`/api` proxyを経由して接続し、APIキーをブラウザへ渡さない。
+画像AIや背景分離との接続には、ローカルで動作する必要最小限のPython FastAPIを使用する。LiveKit Agent workerとはprovider schemaと設定を共有し、別entrypointで起動する。フロントエンドからはViteの`/api` proxyを経由して接続し、APIキーをブラウザへ渡さない。
 
-スマートフォンでの実機確認にはngrokの一時HTTPS URLを使用する。AIエージェントは、可能な範囲でVite、Node.js API、ngrokを起動し、発行されたURLを取得してクリック可能なリンクとして提示する。利用者が手作業でURLを探したり転記したりすることを前提にしない。
+スマートフォンでの実機確認にはngrokの一時HTTPS URLを使用する。AIエージェントは、可能な範囲でVite、FastAPI、LiveKit Agent、ngrokを起動し、発行されたURLを取得してクリック可能なリンクとして提示する。利用者が手作業でURLを探したり転記したりすることを前提にしない。
 
 ngrokの認証や起動条件が揃っていない場合は、その不足を明示する。実機接続がすぐに利用できない場合でも開発を止めず、PCブラウザと保存済み画像による確認を継続する。
 

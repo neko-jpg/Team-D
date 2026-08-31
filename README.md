@@ -12,19 +12,67 @@
 
 ## 開発環境
 
-Node.js 20.19以上とnpmを用意し、次のコマンドでWeb画面とNode.js APIを起動する。
+Node.js 20.19以上、npm、uvを用意する。Pythonは`.python-version`と
+`uv.lock`により3.11へ固定され、FastAPIとLiveKit Agentは同じPython環境、
+provider契約、設定を利用する。初回はリポジトリルートでlockfileどおりに
+依存を導入する。
 
 ```bash
-npm install
+npm ci
+uv sync --frozen
+```
+
+通常の画面開発では、fixture providerのFastAPIとViteを起動する。
+
+```bash
 npm run dev
 ```
 
-ViteはWeb画面を公開し、`/api`へのリクエストをloopback上のNode.js APIへ転送する。API単体を開発モードで確認する場合は`npm run dev:api`を実行し、`http://127.0.0.1:3001/api/health`へアクセスする。build後のAPIは`npm run start:api`で起動できる。
+ViteはWeb画面を公開し、`/api`へのリクエストをloopback上のFastAPIへ
+転送する。API単体は`npm run dev:api`で起動できる。fixture Agentを含む
+3プロセスは、下記のLiveKit資格情報を設定したうえで
+`npm run dev:fixture`を使う。fixtureは画像判定を固定化するモードであり、
+Room transport自体にはLiveKit接続が必要となる。次の応答がNode.js API時代
+から維持するhealth契約である。
+
+```bash
+curl -i http://127.0.0.1:3001/api/health
+# HTTP/1.1 200 OK
+# {"status":"ok"}
+```
+
+Agentを起動する場合は`.env.example`を参考にserver-onlyのLiveKit資格情報を
+`.env.local`へ用意し、現在のshellへ読み込む。判定まで固定化する場合は
+`npm run dev:fixture`、live判定を選ぶ場合は`npm run dev:live`を実行する。
+live失敗をfixture成功へ自動的に切り替えることはない。
+
+```bash
+set -a
+source .env.local
+set +a
+npm run dev:live
+```
+
+起動前のimport、設定、provider構築だけを外部接続なしで確認する場合は、
+次を実行する。このプロジェクトのAgent起動診断にはprovider modeと設定有無
+だけを出し、API keyとsecretは出力しない。
+
+```bash
+npm run check:backend:fixture
+npm run check:backend:live
+npm run check:agent:fixture
+npm run check:agent:live
+```
+
+依存・build・テストの確認コマンドは次のとおり。
 
 ```bash
 npm run typecheck
 npm test
 npm run build
+
+uv run --frozen python -c \
+  "from backend.app import app; from backend.agent import main; from backend.settings import BackendSettings; from backend.providers.vision_guidance import VisionGuidanceProvider; print('python imports ok')"
 ```
 
 ## UIフロー
