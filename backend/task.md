@@ -67,9 +67,9 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 5.5 【ともちゃん】backendからloopbackのrembgへ本番と同じ`file`、`model=birefnet-general-lite`、`om=true`を送るprewarm helperまたはlive integration testを`backend/**`へ追加し、responseが`image/png`かつ入力frontと同寸法のmask-only画像であることを確認する。（元タスク: 6.1）
 
-- [ ] 5.6 【健太】fixture transportで正常、provider timeout、古いevent、shot変更、切断／再接続、再同期を順に発生させ、sequence、expiry、現在shot、provider呼び出しが不正に巻き戻らないバックエンド回帰テストを1コマンドで実行できるようにする。（元タスク: 3.16）
+- [x] 5.6 【健太】fixture transportで正常、provider timeout、古いevent、shot変更、切断／再接続、再同期を順に発生させ、sequence、expiry、現在shot、provider呼び出しが不正に巻き戻らないバックエンド回帰テストを1コマンドで実行できるようにする。（元タスク: 3.16）
 
-- [ ] 5.7 【健太】Agent意味判定の同時実行数1、待機queue最大1、観測から助言event生成までp95 2秒以内、未処理例外0件を計測する。目標外でもqueueを増やさず、最新frameだけを処理することを確認する。（元タスク: 3.17）
+- [x] 5.7 【健太】Agent意味判定の同時実行数1、待機queue最大1、観測から助言event生成までp95 2秒以内、未処理例外0件を計測する。目標外でもqueueを増やさず、最新frameだけを処理することを確認する。（元タスク: 3.17）
 
 - [ ] 5.8 【ともちゃん】fixtureモードでAgent guidance経路と`analyze-shot`、`suggest-measurement-points`、`remove-background`、背景生成providerを順に通すバックエンドE2Eを2回連続で実行し、同じevent、response、error契約を得る。（元タスク: 8.1）
 
