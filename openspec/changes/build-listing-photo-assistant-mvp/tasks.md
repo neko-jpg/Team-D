@@ -37,7 +37,7 @@
 
 ## 3. 既存capture coreのLiveKit・4slot拡張
 
-- [ ] 3.1 【友ちゃんさん】LiveKit project、Room、browser participant、Python Agent用の環境変数と最小接続手順を用意し、同じRoomのparticipant一覧と両側ログでbrowserとAgentの一意なidentityを確認する
+- [x] 3.1 【友ちゃんさん】LiveKit project、Room、browser participant、Python Agent用の環境変数と最小接続手順を用意し、同じRoomのparticipant一覧と両側ログでbrowserとAgentの一意なidentityを確認する
 - [x] 3.2 【友ちゃんさん・健太さん】LiveKit Agents／Python SDKとLiveKit JS SDKの互換性があるstable versionをPython／npm lockfileへ固定し、clean installとSDK importを成功させ、製品名、version、URL、license／noticeを`THIRD_PARTY_NOTICES.md`の固定値と照合する
 - [x] 3.3 【友ちゃんさん・健太さん】完了済みNode.js API scaffoldの`/api/health`契約を保ったまま、FastAPI serverとLiveKit Agent workerがprovider schemaと設定を共有するPython packageへbackendを移行し、ルートからfixture／liveを起動してfrontend build、Python import、health response、Agent起動ログを確認する
 - [x] 3.4 【友ちゃんさん】既存のfront／back／tag契約を、`GuidanceEvent`、measurementを含む4slot、正規化4端点、`MeasurementDraft`／`ApprovedMeasurement`、接続状態、provider errorへ後方互換に拡張し、未知値、欠落、非有限値、範囲外座標、measurementを含む`ShotAssessment`を拒否する契約テストを通す
@@ -60,11 +60,11 @@
 
 ## 4. 撮影後AI判定
 
-- [ ] 4.1 【友ちゃんさん】Wardrobeのstrict schemaパターンを参考に`ShotAssessor`を実装し、`shotType`、`quality`、有限な`issues`、`missingShots`、`nextAction`の全fieldをruntime検証して、front／back／tag／unknown以外、measurement、未知enum、field欠落を拒否する契約テストを通す
+- [x] 4.1 【友ちゃんさん】Wardrobeのstrict schemaパターンを参考に`ShotAssessor`を実装し、`shotType`、`quality`、有限な`issues`、`missingShots`、`nextAction`の全fieldをruntime検証して、front／back／tag／unknown以外、measurement、未知enum、field欠落を拒否する契約テストを通す
 - [ ] 4.2 【徹平さん】正面原本を変更せず解析コピーだけをEXIF回転・sRGB正規化する処理を実装し、向きと色空間が異なるfront／back／tag fixtureで、原本hash不変と解析画像の期待寸法・向きを確認する
-- [ ] 4.3 【友ちゃんさん】FastAPIの`POST /api/analyze-shot`へ`requestedShot: front|back|tag`、multipart、20秒timeout、MIME／size制限、runtime schema検証を実装し、measurement指定、schema不正、timeout時に進捗を変更しないAPI／統合テストを通す
+- [x] 4.3 【友ちゃんさん】FastAPIの`POST /api/analyze-shot`へ`requestedShot: front|back|tag`、multipart、20秒timeout、MIME／size制限、runtime schema検証を実装し、measurement指定、schema不正、timeout時に進捗を変更しないAPI／統合テストを通す
 - [ ] 4.4 【徹平さん】ライブ`READY`でも撮影後AIが`retry`なら、有限issueから最優先の理由と具体的な撮り直し方を1件表示して同じshotへ戻し、対象slotだけを未受理にして他slotを保持し、撮り直し後に届いた古いrequest結果を無視するUI／Reducerテストを通す
-- [ ] 4.5 【友ちゃんさん】live `ShotAssessor`がデモ時間内に安定しない場合は`PROVIDER_MODE=fixture`へ明示的に切り替える手順と継続／停止条件をrunbookへ記録し、live errorをfixture成功responseへ自動変換しない契約テストを通す
+- [x] 4.5 【友ちゃんさん】live `ShotAssessor`がデモ時間内に安定しない場合は`PROVIDER_MODE=fixture`へ明示的に切り替える手順と継続／停止条件をrunbookへ記録し、live errorをfixture成功responseへ自動変換しない契約テストを通す
 
 ## 5. 50mmマーカーによる半自動採寸
 

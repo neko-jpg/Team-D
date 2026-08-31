@@ -15,6 +15,7 @@ AppFactory = Callable[[BackendSettings], Any]
 ApiRunner = Callable[..., Any]
 AgentRunner = Callable[[Any], Any]
 ServerFactory = Callable[..., Any]
+LOGGER = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +68,12 @@ def _run_api(
     runner: ApiRunner | None,
 ) -> None:
     application = _app_factory(app_factory)(settings)
+    LOGGER.info(
+        "api_starting provider_mode=%s url=http://%s:%s",
+        settings.provider_mode.value,
+        settings.api_host,
+        settings.api_port,
+    )
     selected_runner = runner
     if selected_runner is None:
         import uvicorn
@@ -115,6 +122,7 @@ def main(
                 file=output,
             )
             return 0
+        logging.basicConfig(level=logging.INFO)
         _run_api(settings, app_factory=app_factory, runner=api_runner)
         return 0
 

@@ -1,13 +1,11 @@
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import App, { type AppProps } from "./App";
-import {
-  CameraStartError,
-  type CameraSession,
-} from "./camera";
+import App from "./App";
+import { CameraStartError, type CameraSession } from "./camera";
 import { FixtureShotAssessor } from "./providers/fixtureShotAssessor";
+import type { ShotAssessment } from "./shared";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -36,6 +34,7 @@ afterEach(() => {
     roots.forEach((root) => root.unmount());
   });
   roots = [];
+  vi.restoreAllMocks();
 
   if (originalCreateObjectURL === undefined) {
     Reflect.deleteProperty(URL, "createObjectURL");
@@ -56,7 +55,7 @@ afterEach(() => {
   }
 });
 
-function renderApp(props: AppProps = {}): HTMLElement {
+function renderApp(props: ComponentProps<typeof App> = {}): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -71,6 +70,7 @@ function createCameraSession(
   start: () => Promise<void> = async () => undefined,
 ): CameraSession {
   let running = false;
+
   return {
     currentStream: undefined,
     currentVideoTrack: undefined,
@@ -87,16 +87,20 @@ function createCameraSession(
   };
 }
 
-async function clickCameraStart(container: HTMLElement): Promise<void> {
+async function clickButton(
+  container: HTMLElement,
+  label: string,
+): Promise<void> {
   const button = Array.from(container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent?.includes("カメラを起動"),
+    (candidate) => candidate.textContent?.includes(label),
   );
   if (button === undefined) {
-    throw new Error("camera start button is not rendered");
+    throw new Error(`button ${label} is not rendered`);
   }
 
   await act(async () => {
-    button.click();
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
     await Promise.resolve();
   });
 }
@@ -165,60 +169,56 @@ describe("FixtureShotAssessor", () => {
 });
 
 describe("capture upload vertical slice", () => {
-  it("sends a manual camera Blob through the same assessor flow", async () => {
-    const blob = new Blob(["front-camera"], { type: "image/jpeg" });
-    const captureFrame = vi.fn(async () => blob);
-    const session = createCameraSession();
-    const container = renderApp({
-      captureFrame,
-      checkLocalAnalysisSupport: () => true,
-      createCameraController: () => session,
-    });
-
-    await clickCameraStart(container);
-    const shutter = container.querySelector<HTMLButtonElement>(
-      '[data-testid="manual-shutter"]',
+  it("coalesces duplicate uploads while post-capture assessment is pending", async () => {
+    let finishAssessment: ((assessment: ShotAssessment) => void) | undefined;
+    const assessSpy = vi
+      .spyOn(FixtureShotAssessor.prototype, "assess")
+      .mockImplementation(
+        () =>
+          new Promise<ShotAssessment>((resolve) => {
+            finishAssessment = resolve;
+          }),
+      );
+    const container = renderApp();
+    const input = container.querySelector<HTMLInputElement>(
+      '[data-testid="upload-input"]',
     );
-    expect(shutter?.disabled).toBe(false);
+    if (input === null) {
+      throw new Error("upload input is not rendered");
+    }
+    const file = new File(["front"], "front.png", { type: "image/png" });
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [file],
+    });
 
     await act(async () => {
-      shutter?.click();
-      await Promise.resolve();
-      await Promise.resolve();
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
       await Promise.resolve();
     });
 
-    expect(captureFrame).toHaveBeenCalledWith(container.querySelector("video"));
-    expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
-    expect(container.querySelector('[data-testid="current-step"]')?.textContent)
-      .toBe("back");
-    expect(container.querySelector('[data-testid="progress-front"]')?.textContent)
-      .toContain("完了");
-  });
+    expect(assessSpy).toHaveBeenCalledTimes(1);
+    expect(input.disabled).toBe(true);
 
-  it("continues the same upload flow after camera permission is denied", async () => {
-    const session = createCameraSession(async () => {
-      throw new CameraStartError(
-        "permission-denied",
-        "Camera permission was denied.",
-      );
+    await act(async () => {
+      finishAssessment?.({
+        shotType: "front",
+        quality: "ok",
+        issues: [],
+        missingShots: ["back", "tag"],
+        nextAction: "REQUEST_NEXT",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
     });
-    const container = renderApp({
-      createCameraController: () => session,
-    });
-
-    await clickCameraStart(container);
-    expect(container.querySelector('[data-testid="camera-status"]')?.textContent)
-      .toBe("権限が必要");
-    expect(container.querySelector('[data-testid="current-step"]')?.textContent)
-      .toBe("front");
-
-    await upload(container, "front-after-denial.png");
 
     expect(container.querySelector('[data-testid="current-step"]')?.textContent)
       .toBe("back");
-    expect(container.querySelector('[data-testid="progress-front"]')?.textContent)
-      .toContain("完了");
+    expect(
+      container.querySelector<HTMLInputElement>('[data-testid="upload-input"]')
+        ?.disabled,
+    ).toBe(false);
   });
 
   it("keeps the edit entry hidden until front, back, and tag are accepted", async () => {
@@ -230,10 +230,10 @@ describe("capture upload vertical slice", () => {
 
     await upload(container, "front.png");
     expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("back");
-    selectValue(container, "fixture-shot", "back");
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="fixture-shot"]')?.value).toBe("back");
     await upload(container, "back.png");
     expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("tag");
-    selectValue(container, "fixture-shot", "tag");
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="fixture-shot"]')?.value).toBe("tag");
     await upload(container, "tag.png");
 
     expect(container.querySelector('[data-testid="edit-entry"]')).not.toBeNull();
@@ -284,5 +284,130 @@ describe("capture upload vertical slice", () => {
     expect(container.querySelector('[data-testid="capture-status"]')?.textContent).toContain("再試行");
     expect(container.querySelector('[data-testid="provider-error"]')?.textContent).toContain("fixture の ShotAssessor");
     expect(container.querySelector('[data-testid="edit-entry"]')).toBeNull();
+  });
+});
+
+describe("camera capture vertical slice", () => {
+  it("continues the same upload flow after camera permission is denied", async () => {
+    const session = createCameraSession(async () => {
+      throw new CameraStartError(
+        "permission-denied",
+        "Camera permission was denied.",
+      );
+    });
+    const container = renderApp({
+      createCameraController: () => session,
+    });
+
+    await clickButton(container, "カメラを起動");
+    expect(container.querySelector('[data-testid="camera-status"]')?.textContent)
+      .toBe("権限が必要");
+
+    const uploadInput = container.querySelector<HTMLInputElement>(
+      '[data-testid="upload-input"]',
+    );
+    if (uploadInput === null) {
+      throw new Error("upload input is not rendered");
+    }
+    const inputClick = vi
+      .spyOn(uploadInput, "click")
+      .mockImplementation(() => undefined);
+    act(() => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="camera-upload-fallback"]')
+        ?.click();
+    });
+    expect(inputClick).toHaveBeenCalledTimes(1);
+
+    await upload(container, "front-after-denial.png");
+
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent)
+      .toBe("back");
+    expect(container.querySelector('[data-testid="progress-front"]')?.textContent)
+      .toContain("完了");
+  });
+
+  it("keeps the fixture and fixed guide in sync through three camera captures", async () => {
+    const rawCameraBlob = new Blob(["distinctive-raw-camera-frame"], {
+      type: "image/jpeg",
+    });
+    const session = createCameraSession();
+    const captureFrame = vi.fn(async () => rawCameraBlob);
+    const assessSpy = vi.spyOn(FixtureShotAssessor.prototype, "assess");
+    const container = renderApp({
+      captureCameraFrame: captureFrame,
+      checkLocalAnalysisSupport: () => true,
+      createCameraController: () => session,
+    });
+
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("front");
+    expect(container.querySelector('[data-testid="camera-guide"]')?.className).toContain(
+      "camera-guide--front",
+    );
+    expect(container.textContent).toContain("襟・袖・裾をガイド内に入れてください");
+    expect(container.textContent).not.toContain("READY");
+
+    await clickButton(container, "カメラを起動");
+    const shutter = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="正面を撮影"]',
+    );
+    expect(shutter?.disabled).toBe(false);
+
+    await act(async () => {
+      shutter?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captureFrame).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledWith(rawCameraBlob);
+    expect(assessSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blob: rawCameraBlob,
+        requestedShot: "front",
+      }),
+    );
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("back");
+    expect(container.querySelector('[data-testid="camera-guide"]')?.className).toContain(
+      "camera-guide--back",
+    );
+    expect(container.textContent).toContain("裏返して背面を上にしてください");
+    expect(container.querySelector<HTMLImageElement>('img[alt="正面写真"]')?.src).toContain(
+      "blob:test-1",
+    );
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="fixture-shot"]')?.value).toBe(
+      "back",
+    );
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="背面を撮影"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("tag");
+    expect(container.querySelector('[data-testid="camera-guide"]')?.className).toContain(
+      "camera-guide--tag",
+    );
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="fixture-shot"]')?.value).toBe(
+      "tag",
+    );
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="タグを撮影"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captureFrame).toHaveBeenCalledTimes(3);
+    expect(container.querySelector('[data-testid="edit-entry"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="accepted-count"]')?.textContent).toContain("3/3");
   });
 });

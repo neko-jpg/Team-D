@@ -16,8 +16,11 @@
     "dev:agent:fixture": "uv run --frozen python -m backend agent --provider-mode fixture --worker-command dev",
     "dev:agent:live": "uv run --frozen python -m backend agent --provider-mode live --worker-command dev",
     "dev:web": "vite --config app/vite.config.ts --host 0.0.0.0",
+    "dev:livekit-browser": "vite --config app/vite.config.ts --host 127.0.0.1 --open /livekit-smoke.html",
     "start:api": "uv run --frozen python -m backend api --provider-mode live",
     "start:agent": "uv run --frozen python -m backend agent --provider-mode live --worker-command start",
+    "start:agent:fixture": "uv run --frozen python -m backend agent --provider-mode fixture --worker-command start",
+    "start:agent:live": "uv run --frozen python -m backend agent --provider-mode live --worker-command start",
     "check:backend:fixture": "uv run --frozen python -m backend api --provider-mode fixture --check",
     "check:backend:live": "uv run --frozen python -m backend api --provider-mode live --check",
     "check:agent:fixture": "uv run --frozen python -m backend agent --provider-mode fixture --check",
@@ -29,6 +32,9 @@
     "test:web": "vitest run --config app/vitest.config.ts",
     "test:python": "uv run --frozen python -m pytest -q",
     "test": "npm run test:web && npm run test:python",
+    "test:backend": "npm run test:python",
+    "test:phase3": "bash scripts/run-phase3-regression.sh",
+    "verify:backend": "bash scripts/verify-backend.sh",
     "test:watch": "vitest --config app/vitest.config.ts"
   },
   "dependencies": {

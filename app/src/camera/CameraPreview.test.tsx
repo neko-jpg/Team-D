@@ -6,7 +6,6 @@ import {
   CameraPreview,
   type CameraPreviewProps,
 } from "./CameraPreview";
-import { CAPTURE_GUIDES } from "./CaptureGuide";
 import {
   CameraStartError,
   type CameraSession,
@@ -47,7 +46,9 @@ function createSession(
 
 function renderPreview(
   session: CameraSession,
-  props: Omit<CameraPreviewProps, "createController"> = {},
+  props: Omit<CameraPreviewProps, "createController" | "shot"> & {
+    readonly shot?: CameraPreviewProps["shot"];
+  } = {},
 ): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -56,21 +57,15 @@ function renderPreview(
 
   act(() => {
     root.render(
-      <CameraPreview {...props} createController={() => session} />,
+      <CameraPreview
+        {...props}
+        createController={() => session}
+        shot={props.shot ?? "front"}
+      />,
     );
   });
 
   return container;
-}
-
-function manualShutter(container: HTMLElement): HTMLButtonElement {
-  const button = container.querySelector<HTMLButtonElement>(
-    '[data-testid="manual-shutter"]',
-  );
-  if (button === null) {
-    throw new Error("manual shutter is not rendered");
-  }
-  return button;
 }
 
 async function clickStart(container: HTMLElement): Promise<void> {
@@ -87,14 +82,18 @@ async function clickStart(container: HTMLElement): Promise<void> {
   });
 }
 
-describe("CameraPreview", () => {
-  it("shares one garment ROI for front/back and a separate tag rectangle", () => {
-    expect(CAPTURE_GUIDES.front).toEqual(CAPTURE_GUIDES.back);
-    expect(CAPTURE_GUIDES.tag).not.toEqual(CAPTURE_GUIDES.front);
-    expect(CAPTURE_GUIDES.tag.width).toBeGreaterThan(0);
-    expect(CAPTURE_GUIDES.tag.height).toBeGreaterThan(0);
-  });
+function shutter(container: HTMLElement): HTMLButtonElement {
+  const button = container.querySelector<HTMLButtonElement>(
+    'button[aria-label$="を撮影"]',
+  );
+  if (button === null) {
+    throw new Error("camera shutter is not rendered");
+  }
 
+  return button;
+}
+
+describe("CameraPreview", () => {
   it("starts on user action and releases the session on pagehide", async () => {
     const session = createSession();
     const container = renderPreview(session);
@@ -154,220 +153,6 @@ describe("CameraPreview", () => {
     expect(requestUpload).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    ["front", "garment"],
-    ["back", "garment"],
-    ["tag", "tag"],
-  ] as const)("shows the fixed %s guide over a playing video", async (shot, kind) => {
-    const container = renderPreview(createSession(), {
-      checkLocalAnalysisSupport: () => true,
-      currentShot: shot,
-    });
-
-    await clickStart(container);
-
-    const video = container.querySelector("video");
-    const guide = container.querySelector<HTMLElement>(
-      '[data-testid="capture-guide"]',
-    );
-    expect(video).not.toBeNull();
-    expect(guide?.dataset.guideKind).toBe(kind);
-    expect(guide?.dataset.shot).toBe(shot);
-    expect(guide?.parentElement).toBe(video?.parentElement);
-    expect(guide?.querySelector("svg")?.getAttribute("preserveAspectRatio"))
-      .toBe("none");
-    const guideRect = CAPTURE_GUIDES[shot];
-    expect(
-      guide?.querySelector('[data-testid="capture-guide-geometry"]')
-        ?.getAttribute("transform"),
-    ).toBe(
-      `translate(${Number((guideRect.x * 100).toFixed(4))} ${Number((guideRect.y * 100).toFixed(4))}) scale(${guideRect.width} ${guideRect.height})`,
-    );
-  });
-
-  it("captures while a non-READY hint is visible", async () => {
-    const blob = new Blob(["raw-video"], { type: "image/jpeg" });
-    const captureFrame = vi.fn(async () => blob);
-    const onCapture = vi.fn(() => true);
-    const container = renderPreview(createSession(), {
-      captureFrame,
-      checkLocalAnalysisSupport: () => true,
-      currentShot: "front",
-      localHint: "TOO_DARK",
-      onCapture,
-    });
-
-    await clickStart(container);
-    const shutter = manualShutter(container);
-    expect(shutter.disabled).toBe(false);
-    expect(
-      container.querySelector('[data-testid="camera-guidance"]')?.getAttribute(
-        "data-quality-hint",
-      ),
-    ).toBe("TOO_DARK");
-
-    await act(async () => {
-      shutter.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const video = container.querySelector("video");
-    expect(captureFrame).toHaveBeenCalledWith(video);
-    expect(onCapture).toHaveBeenCalledWith({ blob, shot: "front" });
-  });
-
-  it("keeps the guide and manual shutter when local analysis is unavailable", async () => {
-    const blob = new Blob(["fallback-raw"], { type: "image/jpeg" });
-    const onCapture = vi.fn(() => true);
-    const session = createSession();
-    const container = renderPreview(session, {
-      captureFrame: async () => blob,
-      checkLocalAnalysisSupport: () => false,
-      currentShot: "back",
-      onCapture,
-    });
-
-    await clickStart(container);
-
-    expect(
-      container.querySelector('[data-testid="camera-guidance"]')?.getAttribute(
-        "data-quality-hint",
-      ),
-    ).toBe("ANALYZER_UNAVAILABLE");
-    expect(container.querySelector('[data-testid="capture-guide"]')).not.toBeNull();
-    expect(session.stop).not.toHaveBeenCalled();
-    const shutter = manualShutter(container);
-    expect(shutter.disabled).toBe(false);
-
-    await act(async () => {
-      shutter.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(onCapture).toHaveBeenCalledWith({ blob, shot: "back" });
-    expect(session.stop).not.toHaveBeenCalled();
-  });
-
-  it("does not deliver a late raw capture after pagehide", async () => {
-    let finishCapture: ((blob: Blob) => void) | undefined;
-    const captureFrame = vi.fn(
-      () => new Promise<Blob>((resolve) => {
-        finishCapture = resolve;
-      }),
-    );
-    const onCapture = vi.fn();
-    const container = renderPreview(createSession(), {
-      captureFrame,
-      checkLocalAnalysisSupport: () => true,
-      onCapture,
-    });
-
-    await clickStart(container);
-    act(() => {
-      manualShutter(container).click();
-      window.dispatchEvent(new Event("pagehide"));
-    });
-    await act(async () => {
-      finishCapture?.(new Blob(["late"]));
-      await Promise.resolve();
-    });
-
-    expect(onCapture).not.toHaveBeenCalled();
-  });
-
-  it("coalesces rapid shutter presses and recovers from a stale submission", async () => {
-    let finishCapture: ((blob: Blob) => void) | undefined;
-    const captureFrame = vi.fn(
-      () => new Promise<Blob>((resolve) => {
-        finishCapture = resolve;
-      }),
-    );
-    const onCapture = vi.fn(() => false);
-    const container = renderPreview(createSession(), {
-      captureFrame,
-      checkLocalAnalysisSupport: () => true,
-      onCapture,
-    });
-
-    await clickStart(container);
-    act(() => {
-      const shutter = manualShutter(container);
-      shutter.click();
-      shutter.click();
-    });
-    expect(captureFrame).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      finishCapture?.(new Blob(["stale"]));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(onCapture).toHaveBeenCalledTimes(1);
-    expect(manualShutter(container).disabled).toBe(false);
-  });
-
-  it("clears captured feedback when post-capture analysis returns to the same shot", async () => {
-    const session = createSession();
-    const captureFrame = vi.fn(async () => new Blob(["retry"]));
-    const onCapture = vi.fn(() => true);
-    const props = {
-      captureFrame,
-      checkLocalAnalysisSupport: () => true,
-      createController: () => session,
-      currentShot: "front" as const,
-      onCapture,
-    };
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    roots.push(root);
-    act(() => {
-      root.render(<CameraPreview {...props} captureBusy={false} />);
-    });
-
-    await clickStart(container);
-    await act(async () => {
-      manualShutter(container).click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(container.querySelector('[data-testid="camera-guidance"]')?.textContent)
-      .toContain("写真を確認しています");
-
-    act(() => {
-      root.render(<CameraPreview {...props} captureBusy />);
-    });
-    act(() => {
-      root.render(<CameraPreview {...props} captureBusy={false} />);
-    });
-
-    expect(container.querySelector('[data-testid="camera-guidance"]')?.textContent)
-      .toBe("ガイドに合わせて、いつでも撮影できます");
-    expect(manualShutter(container).disabled).toBe(false);
-  });
-
-  it("normalizes capture adapter errors to app-owned copy", async () => {
-    const container = renderPreview(createSession(), {
-      captureFrame: async () => {
-        throw new Error("internal adapter diagnostics");
-      },
-      checkLocalAnalysisSupport: () => true,
-    });
-
-    await clickStart(container);
-    await act(async () => {
-      manualShutter(container).click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const error = container.querySelector('[data-testid="capture-error"]');
-    expect(error?.textContent).toContain("カメラを確認してもう一度");
-    expect(error?.textContent).not.toContain("internal adapter diagnostics");
-  });
-
   it("stops the controller when the preview unmounts", async () => {
     const session = createSession();
     const container = renderPreview(session);
@@ -378,5 +163,278 @@ describe("CameraPreview", () => {
     });
 
     expect(session.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("switches between the garment and tag guides for the requested shot", () => {
+    const session = createSession();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    act(() => {
+      root.render(
+        <CameraPreview createController={() => session} shot="front" />,
+      );
+    });
+
+    const frontGuide = container.querySelector('[data-testid="camera-guide"]');
+    expect(frontGuide?.classList.contains("camera-guide--front")).toBe(true);
+    expect(frontGuide?.getAttribute("aria-hidden")).toBe("true");
+    expect(frontGuide?.querySelector(".camera-garment-guide")).not.toBeNull();
+    expect(container.textContent).toContain(
+      "襟・袖・裾をガイド内に入れてください",
+    );
+
+    act(() => {
+      root.render(
+        <CameraPreview createController={() => session} shot="back" />,
+      );
+    });
+
+    expect(
+      container
+        .querySelector('[data-testid="camera-guide"]')
+        ?.classList.contains("camera-guide--back"),
+    ).toBe(true);
+    expect(container.textContent).toContain("裏返して背面を上にしてください");
+
+    act(() => {
+      root.render(
+        <CameraPreview createController={() => session} shot="tag" />,
+      );
+    });
+
+    const tagGuide = container.querySelector('[data-testid="camera-guide"]');
+    expect(tagGuide?.classList.contains("camera-guide--tag")).toBe(true);
+    expect(tagGuide?.querySelector(".camera-tag-guide")).not.toBeNull();
+    expect(container.textContent).toContain(
+      "タグに近づき、枠に合わせてください",
+    );
+  });
+
+  it("captures manually outside READY and passes the raw Blob unchanged", async () => {
+    const session = createSession();
+    const rawBlob = new Blob(["raw frame"], { type: "image/jpeg" });
+    const captureFrame = vi.fn(async () => rawBlob);
+    const onCapture = vi.fn();
+    const container = renderPreview(session, { captureFrame, onCapture });
+
+    await clickStart(container);
+
+    const video = container.querySelector("video");
+    const captureButton = shutter(container);
+    expect(container.textContent).not.toContain("READY");
+    expect(captureButton.disabled).toBe(false);
+
+    await act(async () => {
+      captureButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captureFrame).toHaveBeenCalledTimes(1);
+    expect(captureFrame).toHaveBeenCalledWith(video);
+    expect(onCapture).toHaveBeenCalledTimes(1);
+    expect(onCapture).toHaveBeenCalledWith(rawBlob);
+    expect(shutter(container).disabled).toBe(false);
+  });
+
+  it("keeps the fixed guide, shutter, and upload fallback when local analysis is unavailable", async () => {
+    const session = createSession();
+    const rawBlob = new Blob(["fallback raw frame"], { type: "image/jpeg" });
+    const captureFrame = vi.fn(async () => rawBlob);
+    const onCapture = vi.fn();
+    const requestUpload = vi.fn();
+    const container = renderPreview(session, {
+      captureFrame,
+      checkLocalAnalysisSupport: () => false,
+      onCapture,
+      onRequestUpload: requestUpload,
+      shot: "back",
+    });
+
+    await clickStart(container);
+
+    expect(
+      container.querySelector('[data-testid="camera-guidance"]')?.getAttribute(
+        "data-quality-hint",
+      ),
+    ).toBe("ANALYZER_UNAVAILABLE");
+    expect(container.querySelector('[data-testid="camera-guide"]')).not.toBeNull();
+    expect(session.stop).not.toHaveBeenCalled();
+    expect(shutter(container).disabled).toBe(false);
+
+    act(() => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="camera-upload-fallback"]')
+        ?.click();
+    });
+    expect(requestUpload).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      shutter(container).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCapture).toHaveBeenCalledWith(rawBlob);
+    expect(session.stop).not.toHaveBeenCalled();
+  });
+
+  it("keeps manual capture available while a non-READY local hint is visible", async () => {
+    const rawBlob = new Blob(["dark raw frame"], { type: "image/jpeg" });
+    const captureFrame = vi.fn(async () => rawBlob);
+    const onCapture = vi.fn();
+    const container = renderPreview(createSession(), {
+      captureFrame,
+      checkLocalAnalysisSupport: () => true,
+      localHint: "TOO_DARK",
+      onCapture,
+    });
+
+    await clickStart(container);
+
+    expect(
+      container.querySelector('[data-testid="camera-guidance"]')?.getAttribute(
+        "data-quality-hint",
+      ),
+    ).toBe("TOO_DARK");
+    expect(shutter(container).disabled).toBe(false);
+
+    await act(async () => {
+      shutter(container).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCapture).toHaveBeenCalledWith(rawBlob);
+  });
+
+  it("does not deliver a late raw capture after pagehide", async () => {
+    let finishCapture: ((blob: Blob) => void) | undefined;
+    const captureFrame = vi.fn(
+      () =>
+        new Promise<Blob>((resolve) => {
+          finishCapture = resolve;
+        }),
+    );
+    const onCapture = vi.fn();
+    const container = renderPreview(createSession(), {
+      captureFrame,
+      checkLocalAnalysisSupport: () => true,
+      onCapture,
+    });
+
+    await clickStart(container);
+    act(() => {
+      shutter(container).click();
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    await act(async () => {
+      finishCapture?.(new Blob(["late"]));
+      await Promise.resolve();
+    });
+
+    expect(onCapture).not.toHaveBeenCalled();
+  });
+
+  it("blocks repeated shutter presses while one capture is in flight", async () => {
+    const session = createSession();
+    const rawBlob = new Blob(["raw frame"], { type: "image/jpeg" });
+    let resolveCapture: ((blob: Blob) => void) | undefined;
+    const captureFrame = vi.fn(
+      () =>
+        new Promise<Blob>((resolve) => {
+          resolveCapture = resolve;
+        }),
+    );
+    const onCapture = vi.fn();
+    const container = renderPreview(session, { captureFrame, onCapture });
+
+    await clickStart(container);
+
+    const captureButton = shutter(container);
+    act(() => {
+      captureButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      captureButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(captureFrame).toHaveBeenCalledTimes(1);
+    expect(shutter(container).disabled).toBe(true);
+
+    await act(async () => {
+      resolveCapture?.(rawBlob);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCapture).toHaveBeenCalledTimes(1);
+    expect(shutter(container).disabled).toBe(false);
+  });
+
+  it("keeps the shutter blocked until post-capture validation finishes", async () => {
+    const session = createSession();
+    const rawBlob = new Blob(["raw frame"], { type: "image/jpeg" });
+    const captureFrame = vi.fn(async () => rawBlob);
+    let finishValidation: (() => void) | undefined;
+    const onCapture = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishValidation = resolve;
+        }),
+    );
+    const container = renderPreview(session, { captureFrame, onCapture });
+
+    await clickStart(container);
+
+    await act(async () => {
+      shutter(container).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(shutter(container).disabled).toBe(true);
+    act(() => {
+      shutter(container).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    expect(captureFrame).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishValidation?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCapture).toHaveBeenCalledWith(rawBlob);
+    expect(shutter(container).disabled).toBe(false);
+  });
+
+  it("keeps the camera usable after a frame capture error", async () => {
+    const session = createSession();
+    const captureFrame = vi.fn(async () => {
+      throw new Error("canvas unavailable");
+    });
+    const container = renderPreview(session, { captureFrame });
+
+    await clickStart(container);
+
+    await act(async () => {
+      shutter(container).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "もう一度撮影してください",
+    );
+    expect(container.querySelector('[data-testid="camera-status"]')?.textContent)
+      .toBe("映像表示中");
+    expect(shutter(container).disabled).toBe(false);
   });
 });

@@ -8,11 +8,15 @@ dependencies = [
   "livekit==1.1.15",
   "livekit-agents==1.7.1",
   "livekit-api==1.2.1",
+  "openai==2.54.0",
+  "python-dotenv==1.2.3",
+  "python-multipart==0.0.20",
   "uvicorn==0.35.0",
 ]
 
 [dependency-groups]
 dev = [
+  "httpx==0.28.1",
   "pytest==8.4.1",
 ]
 

@@ -19,9 +19,22 @@ from .vision_guidance import (
     VisionDecision,
     VisionGuidanceProvider,
 )
+from .shot_assessor import (
+    AssessmentImage,
+    ResponsesShotAssessor,
+    ShotAssessment,
+    ShotAssessmentContractError,
+    ShotAssessor,
+    ShotAssessorInput,
+    validate_shot_assessment,
+)
+from .shot_assessor_factory import FixtureShotAssessor, create_shot_assessor
+
 
 __all__ = [
+    "AssessmentImage",
     "EncodedImage",
+    "FixtureShotAssessor",
     "FixtureVisionGuidanceProvider",
     "GuidanceCode",
     "GuidanceContractError",
@@ -31,9 +44,16 @@ __all__ = [
     "LiveVisionGuidanceProvider",
     "ProviderInference",
     "ProviderUnavailableError",
+    "ResponsesShotAssessor",
+    "ShotAssessment",
+    "ShotAssessmentContractError",
+    "ShotAssessor",
+    "ShotAssessorInput",
     "VisionDecision",
     "VisionGuidanceProvider",
     "create_provider_inference",
+    "create_shot_assessor",
     "create_vision_guidance_provider",
     "guidance_input_from_frame",
+    "validate_shot_assessment",
 ]

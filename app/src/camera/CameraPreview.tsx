@@ -11,16 +11,15 @@ import {
   CameraStartError,
   type CameraSession,
 } from "./cameraController";
-import type { CaptureSlot, LiveHint } from "../shared";
-import { CaptureGuide } from "./CaptureGuide";
+import type { LiveHint } from "../shared";
+import {
+  captureVideoFrame,
+  type CaptureFrameReader,
+} from "./captureFrame";
 import {
   supportsLocalAnalysis,
   type LocalAnalysisSupportCheck,
 } from "./localAnalysisSupport";
-import {
-  captureRawVideoFrame,
-  type RawFrameCapture,
-} from "./rawCapture";
 import "./camera.css";
 
 export type CameraControllerFactory = (
@@ -29,15 +28,13 @@ export type CameraControllerFactory = (
 
 export interface CameraPreviewProps {
   readonly captureBusy?: boolean;
-  readonly captureFrame?: RawFrameCapture;
+  readonly captureFrame?: CaptureFrameReader;
   readonly checkLocalAnalysisSupport?: LocalAnalysisSupportCheck;
   readonly createController?: CameraControllerFactory;
-  readonly currentShot?: CaptureSlot;
   readonly localHint?: LiveHint;
-  readonly onCapture?: (
-    capture: { readonly blob: Blob; readonly shot: CaptureSlot },
-  ) => boolean | void | Promise<boolean | void>;
+  readonly onCapture?: (blob: Blob) => Promise<void> | void;
   readonly onRequestUpload?: () => void;
+  readonly shot: "back" | "front" | "tag";
 }
 
 type CameraViewState =
@@ -51,6 +48,31 @@ type CameraViewState =
 
 const defaultControllerFactory: CameraControllerFactory = (video) =>
   new CameraController(video);
+
+const shotContent = {
+  front: {
+    action: "襟・袖・裾をガイド内に入れてください",
+    label: "正面",
+  },
+  back: {
+    action: "裏返して背面を上にしてください",
+    label: "背面",
+  },
+  tag: {
+    action: "タグに近づき、枠に合わせてください",
+    label: "タグ",
+  },
+} as const;
+
+const LOCAL_HINT_LABELS: Record<LiveHint, string> = {
+  TOO_DARK: "もう少し明るい場所へ移動してください",
+  TOO_BRIGHT: "光が直接当たらない位置へ動かしてください",
+  TOO_BLURRY: "画面をタップしてピントを合わせてください",
+  HOLD_STEADY: "そのまま止めてください",
+  READY: "きれいに撮れそうです",
+  ANALYZER_UNAVAILABLE:
+    "端末内の画質サポートを利用できません。ガイドを見ながら撮影できます",
+};
 
 function viewError(error: unknown): CameraViewState {
   if (error instanceof CameraStartError) {
@@ -111,71 +133,40 @@ function statusLabel(state: CameraViewState): string {
   }
 }
 
-const LOCAL_HINT_LABELS: Record<LiveHint, string> = {
-  TOO_DARK: "もう少し明るい場所へ移動してください",
-  TOO_BRIGHT: "光が強すぎます。反射を避けてください",
-  TOO_BLURRY: "カメラをゆっくり固定してください",
-  HOLD_STEADY: "そのまま少し止めてください",
-  READY: "撮影できます",
-  ANALYZER_UNAVAILABLE:
-    "端末内の画質サポートを利用できません。ガイドを見ながら撮影できます",
-};
-
-/**
- * Camera lifecycle, fixed guide, and manual capture stay independent from the
- * optional local analyzer so a quality hint never gates the shutter.
- */
+/** Camera lifecycle, fixed guides and manual raw-frame capture surface. */
 export function CameraPreview({
   captureBusy = false,
-  captureFrame = captureRawVideoFrame,
+  captureFrame = captureVideoFrame,
   checkLocalAnalysisSupport = supportsLocalAnalysis,
   createController = defaultControllerFactory,
-  currentShot = "front",
   localHint,
   onCapture,
   onRequestUpload,
+  shot,
 }: CameraPreviewProps): ReactElement {
   const [view, setView] = useState<CameraViewState>({ type: "idle" });
   const [analysisAvailable, setAnalysisAvailable] = useState<
     "unknown" | "available" | "unavailable"
   >("unknown");
-  const [capturePhase, setCapturePhase] = useState<
-    "idle" | "capturing" | "captured"
-  >("idle");
-  const [captureError, setCaptureError] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [captureError, setCaptureError] = useState<string | undefined>();
   const videoRef = useRef<HTMLVideoElement>(null);
   const controllerRef = useRef<CameraSession | undefined>(undefined);
   const mountedRef = useRef(false);
   const attemptRef = useRef(0);
-  const captureAttemptRef = useRef(0);
-  const captureInFlightRef = useRef(false);
-  const previousCaptureBusyRef = useRef(captureBusy);
+  const captureActiveRef = useRef(false);
 
   const stopCamera = useCallback((updateView: boolean): void => {
     attemptRef.current += 1;
-    captureAttemptRef.current += 1;
-    captureInFlightRef.current = false;
+    captureActiveRef.current = false;
     controllerRef.current?.stop();
     if (updateView && mountedRef.current) {
       setView({ type: "idle" });
       setAnalysisAvailable("unknown");
-      setCapturePhase("idle");
-      setCaptureError(null);
+      setIsCapturing(false);
+      setCaptureError(undefined);
     }
   }, []);
-
-  useEffect(() => {
-    setCapturePhase("idle");
-    setCaptureError(null);
-  }, [currentShot]);
-
-  useEffect(() => {
-    if (previousCaptureBusyRef.current && !captureBusy) {
-      setCapturePhase("idle");
-      setCaptureError(null);
-    }
-    previousCaptureBusyRef.current = captureBusy;
-  }, [captureBusy]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -207,13 +198,17 @@ export function CameraPreview({
     const attempt = ++attemptRef.current;
     const controller = controllerRef.current ?? createController(video);
     controllerRef.current = controller;
+    setCaptureError(undefined);
+    setAnalysisAvailable("unknown");
     setView({ type: "requesting" });
-    setCaptureError(null);
 
     try {
       await controller.start();
       if (mountedRef.current && attempt === attemptRef.current) {
-        setView(controller.isRunning ? { type: "playing" } : { type: "idle" });
+        const nextView = controller.isRunning
+          ? { type: "playing" as const }
+          : { type: "idle" as const };
+        setView(nextView);
         if (controller.isRunning) {
           let supported = false;
           try {
@@ -233,59 +228,51 @@ export function CameraPreview({
 
   const isPlaying = view.type === "playing";
   const isRequesting = view.type === "requesting";
-  const isCapturing = capturePhase === "capturing";
-  const analyzerUnavailable = analysisAvailable === "unavailable";
+  const currentShot = shotContent[shot];
+  const analyzerUnavailable =
+    analysisAvailable === "unavailable" ||
+    localHint === "ANALYZER_UNAVAILABLE";
   const visibleHint: LiveHint | undefined = analyzerUnavailable
     ? "ANALYZER_UNAVAILABLE"
     : localHint;
-  const uploadFallback = view.type === "denied" || view.type === "unavailable";
+  const uploadFallback =
+    view.type === "denied" ||
+    view.type === "unavailable" ||
+    analyzerUnavailable;
 
-  const captureManually = async (): Promise<void> => {
+  const captureCurrentFrame = async (): Promise<void> => {
     const video = videoRef.current;
     if (
       video === null ||
       !isPlaying ||
-      captureInFlightRef.current ||
+      captureActiveRef.current ||
       captureBusy
     ) {
       return;
     }
 
-    const captureAttempt = ++captureAttemptRef.current;
-    captureInFlightRef.current = true;
-    setCapturePhase("capturing");
-    setCaptureError(null);
+    captureActiveRef.current = true;
+    const attempt = attemptRef.current;
+    setCaptureError(undefined);
+    setIsCapturing(true);
 
     try {
       const blob = await captureFrame(video);
-      if (!mountedRef.current || captureAttempt !== captureAttemptRef.current) {
+      if (!mountedRef.current || attempt !== attemptRef.current) {
         return;
       }
 
-      const accepted = await onCapture?.({ blob, shot: currentShot });
-      if (
-        mountedRef.current &&
-        captureAttempt === captureAttemptRef.current &&
-        accepted === false
-      ) {
-        setCapturePhase("idle");
-        return;
-      }
-      if (
-        mountedRef.current &&
-        captureAttempt === captureAttemptRef.current &&
-        accepted !== false
-      ) {
-        setCapturePhase("captured");
-      }
+      await onCapture?.(blob);
     } catch {
-      if (mountedRef.current && captureAttempt === captureAttemptRef.current) {
-        setCapturePhase("idle");
-        setCaptureError("撮影できませんでした。カメラを確認してもう一度お試しください。");
+      if (mountedRef.current && attempt === attemptRef.current) {
+        setCaptureError(
+          "写真を保存できませんでした。カメラはそのままです。もう一度撮影してください。",
+        );
       }
     } finally {
-      if (captureAttempt === captureAttemptRef.current) {
-        captureInFlightRef.current = false;
+      if (mountedRef.current && attempt === attemptRef.current) {
+        captureActiveRef.current = false;
+        setIsCapturing(false);
       }
     }
   };
@@ -299,11 +286,11 @@ export function CameraPreview({
     >
       <div className="camera-preview-heading">
         <div>
-          <p className="camera-preview-kicker">背面カメラ</p>
-          <h3 id="camera-preview-title">カメラプレビュー</h3>
+          <p className="camera-preview-kicker">{currentShot.label}を撮影</p>
+          <h3 id="camera-preview-title">カメラで撮影</h3>
         </div>
         <span className="camera-preview-status" data-testid="camera-status">
-          {statusLabel(view)}
+          {isCapturing ? "撮影中" : statusLabel(view)}
         </span>
       </div>
 
@@ -316,7 +303,27 @@ export function CameraPreview({
           playsInline
           ref={videoRef}
         />
-        {isPlaying ? <CaptureGuide shot={currentShot} /> : null}
+        <div
+          aria-hidden="true"
+          className={`camera-guide camera-guide--${shot}`}
+          data-testid="camera-guide"
+        >
+          {shot === "tag" ? (
+            <span className="camera-tag-guide" />
+          ) : (
+            <span className="camera-garment-guide" />
+          )}
+        </div>
+        <p
+          className="camera-guidance"
+          aria-live="polite"
+          data-quality-hint={visibleHint}
+          data-testid="camera-guidance"
+        >
+          {visibleHint === undefined
+            ? currentShot.action
+            : LOCAL_HINT_LABELS[visibleHint]}
+        </p>
         {!isPlaying ? (
           <div className="camera-placeholder" aria-hidden="true">
             <span>カメラを起動すると映像が表示されます</span>
@@ -326,20 +333,20 @@ export function CameraPreview({
 
       <div className="camera-preview-actions">
         {isPlaying ? (
-          <div className="camera-playing-actions">
+          <div className="camera-playing-controls">
             <button
               className="camera-secondary-button"
               onClick={() => stopCamera(true)}
               type="button"
             >
-              カメラを停止
+              停止
             </button>
             <button
-              aria-label={`${currentShot === "front" ? "正面" : currentShot === "back" ? "背面" : "タグ"}を撮影`}
-              className="camera-shutter-button"
+              aria-label={`${currentShot.label}を撮影`}
+              className="camera-shutter"
               data-testid="manual-shutter"
               disabled={isCapturing || captureBusy}
-              onClick={() => void captureManually()}
+              onClick={() => void captureCurrentFrame()}
               type="button"
             >
               <span aria-hidden="true" />
@@ -359,22 +366,16 @@ export function CameraPreview({
                 : "もう一度試す"}
           </button>
         )}
-        <p
-          aria-live="polite"
-          data-quality-hint={visibleHint}
-          data-testid="camera-guidance"
-        >
-          {isCapturing
-            ? "撮影しています…"
-            : capturePhase === "captured"
-              ? "撮影しました。写真を確認しています"
-              : visibleHint === undefined
-                ? "ガイドに合わせて、いつでも撮影できます"
-                : LOCAL_HINT_LABELS[visibleHint]}
+        <p aria-live="polite">
+          カメラが使えない場合は、下の画像選択から続けられます。
         </p>
       </div>
 
-      {"message" in view ? (
+      {captureError !== undefined ? (
+        <p className="camera-error" data-testid="capture-error" role="alert">
+          {captureError}
+        </p>
+      ) : "message" in view ? (
         <div className="camera-error">
           <p role="alert">{view.message}</p>
           {uploadFallback && onRequestUpload !== undefined ? (
@@ -388,12 +389,20 @@ export function CameraPreview({
             </button>
           ) : null}
         </div>
-      ) : null}
-
-      {captureError !== null ? (
-        <p className="camera-error" data-testid="capture-error" role="alert">
-          {captureError}
-        </p>
+      ) : analyzerUnavailable && onRequestUpload !== undefined ? (
+        <div
+          className="camera-analysis-fallback"
+          data-testid="camera-analysis-fallback"
+        >
+          <button
+            className="camera-upload-fallback-button"
+            data-testid="camera-upload-fallback"
+            onClick={onRequestUpload}
+            type="button"
+          >
+            画像を選んで続ける
+          </button>
+        </div>
       ) : null}
     </section>
   );

@@ -6,13 +6,13 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type ComponentProps,
   type ReactElement,
 } from "react";
 
 import type {
   ProviderError,
   ShotAssessment,
-  ShotType,
 } from "./shared";
 import { ProviderErrorSchema, ShotAssessmentSchema } from "./shared";
 import {
@@ -32,12 +32,7 @@ import {
   type FixtureOutcome,
   type ShotAssessor,
 } from "./providers";
-import {
-  CameraPreview,
-  type CameraControllerFactory,
-  type LocalAnalysisSupportCheck,
-  type RawFrameCapture,
-} from "./camera";
+import { CameraPreview } from "./camera";
 
 const SHOT_TYPES = ["front", "back", "tag"] as const satisfies
   readonly CaptureShotType[];
@@ -68,14 +63,16 @@ function isCaptureShot(value: CaptureState["currentStep"]): value is CaptureShot
   return value === "front" || value === "back" || value === "tag";
 }
 
-function createCaptureObjectUrl(blob: Blob, slot: CaptureShotType): string {
+function createCaptureObjectUrl(blob: Blob): string {
   if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
     return URL.createObjectURL(blob);
   }
 
   // jsdom does not provide createObjectURL. The browser path above is always
   // used in the app; this non-empty fallback keeps reducer tests deterministic.
-  return `blob:capture-${slot}-${blob.size}`;
+  const fileName = blob instanceof File ? blob.name : "camera";
+  const lastModified = blob instanceof File ? blob.lastModified : 0;
+  return `blob:capture-${fileName}-${blob.size}-${lastModified}`;
 }
 
 function revokeUploadObjectUrl(url: string): void {
@@ -110,7 +107,7 @@ function statusLabel(state: CaptureState): string {
     case "ready_to_edit":
       return "3枚の写真が揃いました";
     case "capturing":
-      return "写真を選んでください";
+      return "撮影または画像を選んでください";
   }
 }
 
@@ -134,14 +131,19 @@ function assessmentMessage(
   return "この写真は受け付けられません。撮り直してください。";
 }
 
+type CameraPreviewDependencies = Pick<
+  ComponentProps<typeof CameraPreview>,
+  "captureFrame" | "checkLocalAnalysisSupport" | "createController"
+>;
+
 export interface AppProps {
-  readonly captureFrame?: RawFrameCapture;
-  readonly checkLocalAnalysisSupport?: LocalAnalysisSupportCheck;
-  readonly createCameraController?: CameraControllerFactory;
+  readonly captureCameraFrame?: CameraPreviewDependencies["captureFrame"];
+  readonly checkLocalAnalysisSupport?: CameraPreviewDependencies["checkLocalAnalysisSupport"];
+  readonly createCameraController?: CameraPreviewDependencies["createController"];
 }
 
 export function App({
-  captureFrame,
+  captureCameraFrame,
   checkLocalAnalysisSupport,
   createCameraController,
 }: AppProps = {}): ReactElement {
@@ -169,12 +171,10 @@ export function App({
   );
 
   useEffect(() => {
-    const urls = objectUrls.current;
-    return () => {
-      urls.forEach(revokeUploadObjectUrl);
-      urls.clear();
-    };
-  }, []);
+    if (isCaptureShot(state.currentStep)) {
+      setFixtureShot(state.currentStep);
+    }
+  }, [state.currentStep]);
 
   useEffect(() => {
     if (state.status === "capturing") {
@@ -182,50 +182,57 @@ export function App({
     }
   }, [state.currentStep, state.status]);
 
+  useEffect(() => {
+    const urls = objectUrls.current;
+    return () => {
+      urls.forEach(revokeUploadObjectUrl);
+      urls.clear();
+    };
+  }, []);
+
   const runAssessment = useCallback(
-    (
+    async (
       provider: ShotAssessor,
       slot: CaptureShotType,
       blob: Blob,
       requestId: string,
       acceptedShots: readonly CaptureShotType[],
-    ) => {
-      void provider
-        .assess({
+    ): Promise<void> => {
+      try {
+        const result = await provider.assess({
           blob,
           requestedShot: slot,
           acceptedShots,
-        })
-        .then((result) => {
-          const assessment = ShotAssessmentSchema.parse(result);
-          dispatch(captureActions.shotAssessed(slot, assessment, requestId));
-        })
-        .catch((error: unknown) => {
-          dispatch(
-            captureActions.providerError(
-              slot,
-              normalizeProviderError(error),
-              requestId,
-            ),
-          );
         });
+        const assessment = ShotAssessmentSchema.parse(result);
+        dispatch(captureActions.shotAssessed(slot, assessment, requestId));
+      } catch (error: unknown) {
+        dispatch(
+          captureActions.providerError(
+            slot,
+            normalizeProviderError(error),
+            requestId,
+          ),
+        );
+      }
     },
     [dispatch],
   );
 
-  const submitCaptureBlob = useCallback(
-    (slot: CaptureShotType, blob: Blob): boolean => {
+  const submitImage = useCallback(
+    async (blob: Blob): Promise<void> => {
       const currentState = stateRef.current;
       if (
-        currentState.currentStep !== slot ||
         currentState.status !== "capturing" ||
+        !isCaptureShot(currentState.currentStep) ||
         submissionInFlightRef.current
       ) {
-        return false;
+        return;
       }
 
       submissionInFlightRef.current = true;
-      const objectUrl = createCaptureObjectUrl(blob, slot);
+      const slot = currentState.currentStep;
+      const objectUrl = createCaptureObjectUrl(blob);
       objectUrls.current.add(objectUrl);
       const requestId = createCaptureRequestId();
       const acceptedShots = SHOT_TYPES.filter(
@@ -233,8 +240,7 @@ export function App({
       );
 
       dispatch(captureActions.submitCapture(slot, blob, objectUrl, requestId));
-      runAssessment(assessor, slot, blob, requestId, acceptedShots);
-      return true;
+      await runAssessment(assessor, slot, blob, requestId, acceptedShots);
     },
     [assessor, dispatch, runAssessment],
   );
@@ -242,13 +248,12 @@ export function App({
   const handleUpload = (event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    const currentStep = stateRef.current.currentStep;
 
-    if (file === undefined || !isCaptureShot(currentStep)) {
+    if (file === undefined) {
       return;
     }
 
-    submitCaptureBlob(currentStep, file);
+    void submitImage(file);
   };
 
   const handleRetryAnalysis = (): void => {
@@ -262,7 +267,7 @@ export function App({
       (acceptedSlot) => state.slots[acceptedSlot] !== null,
     );
     dispatch(captureActions.retryAnalysis(requestId));
-    runAssessment(
+    void runAssessment(
       assessor,
       pendingCapture.slot,
       pendingCapture.blob,
@@ -338,12 +343,12 @@ export function App({
 
             <CameraPreview
               captureBusy={state.status !== "capturing"}
-              captureFrame={captureFrame}
+              captureFrame={captureCameraFrame}
               checkLocalAnalysisSupport={checkLocalAnalysisSupport}
               createController={createCameraController}
-              currentShot={currentCaptureSlot}
-              onCapture={({ blob, shot }) => submitCaptureBlob(shot, blob)}
+              onCapture={submitImage}
               onRequestUpload={() => uploadInputRef.current?.click()}
+              shot={currentCaptureSlot}
             />
 
             <div className="upload-panel">
@@ -409,7 +414,7 @@ export function App({
             </div>
 
             <p className="helper-text">
-              ライブ判定がREADYでなくても、手動撮影とアップロードを使えます。
+              ガイドの状態にかかわらず手動撮影できます。カメラを使えない場合は画像を選んでください。
             </p>
 
             {state.status === "analyzing" ? (
