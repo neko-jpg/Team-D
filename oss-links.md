@@ -1,30 +1,39 @@
-# Mercari AI Agent Hackathon OSS一覧
+# Mercari AI Agent Hackathon OSS索引
 
 最終更新: 2026-08-31
 
-## 採用・利用候補
+このファイルは採用判断の索引とする。コード・関数単位の詳細は[architecture.md](./architecture.md#4-oss利用境界)へ集約する。
 
-| 機能 | OSS | 用途・利用範囲 |
-|---|---|---|
-| モバイルWeb・画面構成 | [Wardrobe](https://github.com/tandpfun/wardrobe) | React／Vite構成、画像処理中・確認・承認フローの参考 |
-| カメラ撮影・eKYC型品質判定 | [document-autocapture](https://github.com/maazkhan77/document-autocapture) | カメラ起動、ブレ・暗さ・反射・静止判定、撮り直し、Web Worker |
-| 衣類・撮影方向のAI判定 | [Wardrobe](https://github.com/tandpfun/wardrobe) | 画像をAIに送り、構造化データを取得する実装の参考 |
-| 商品と背景の分離 | [rembg](https://github.com/danielgatis/rembg) | HTTPサーバーとして背景除去・商品マスクを生成 |
-| 高精度な商品マスク | [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) | `rembg`から使用する背景分離モデル候補 |
-| 背景選択・画像合成 | [react-konva](https://github.com/konvajs/react-konva) | 商品レイヤーと背景レイヤーの合成、位置調整、画像出力 |
-| 撮影進捗・状態遷移 | [XState](https://github.com/statelyai/xstate) | 正面、背面、タグ、確認などの状態管理 |
-| 衣類の測定点検出 | [GarmentIQ](https://github.com/lygitdata/GarmentIQ) | 肩、脇、裾などのランドマーク候補を取得 |
+## 採用・限定移植
 
-## 参考のみ・今回は直接採用しないOSS
+| OSS | 固定対象 | 採用形態 | 使う部分 |
+|---|---|---|---|
+| [Wardrobe](https://github.com/tandpfun/wardrobe/tree/f44006cce7e4779e595a35b25fbbc8dabc68d7e4) | `f44006c` | 設計参考のみ | 画像正規化の順序、Responses strict schema、review／approve状態設計 |
+| [document-autocapture](https://github.com/maazkhan77/document-autocapture/tree/e24df25d17ddc4cf7d7944c653bd0fba55025452) | `e24df25` / 1.0.6 | 関数を限定移植 | カメラ制御、グレースケール、輝度、Laplacian分散、raw撮影 |
+| [rembg](https://github.com/danielgatis/rembg/tree/b439167d2eb22e51e7ec0732efe771bf920ff5c1) | v2.0.81 / `b439167` | Python HTTP sidecar | `/api/remove`のmask-only応答 |
+| [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) | `birefnet-general-lite` | rembg経由のみ | General Lite ONNX重み |
 
-| OSS | 採用しない理由 |
+## 明示的に使わない部分
+
+| OSS | 使わない部分 |
 |---|---|
-| [Nitidoc](https://github.com/santiagoisra/nitidoc) | AGPL-3.0で、現行版ではREADME掲載のライブ自動撮影が削除されているため、設計参考に限定する |
-| [background-removal-js](https://github.com/imgly/background-removal-js) | AGPL-3.0で、モバイル上のモデル読み込みがデモの不安定要因になるため |
+| Wardrobe | garment reconstruction、Images Edit、人物着用生成、クロマキー、disk job、polling |
+| document-autocapture | 書類検出、Quad、glare／area、perspective warp、自動撮影、document guidance |
+| rembg | 既定モデル任せ、GET URL入力、Gradio UI、alpha matting、ブラウザ直結 |
+| BiRefNet | 学習repo、PyTorch直実行、fine-tune、large／videoモデル |
 
-## 関連資料
+## 今回不採用
 
-- [企画要件定義](./requirements.md)
-- [Webアーキテクチャ](./architecture.md)
-- [衣類自動採寸OSS調査](./garment-measurement-oss.md)
-- [eKYC・AR UIフロー画像](./ekyc-ar-ui-flow-final.png)
+| OSS | 理由 | 代替 |
+|---|---|---|
+| [react-konva](https://github.com/konvajs/react-konva) | 固定合成だけには過剰 | native Canvas 2D |
+| [XState](https://github.com/statelyai/xstate) | 直列フローには過剰 | 型付き`useReducer` |
+| [GarmentIQ](https://github.com/lygitdata/GarmentIQ) | 採寸と複数モデルが1日スコープ外 | 採寸を除外 |
+| [Nitidoc](https://github.com/santiagoisra/nitidoc) | AGPL-3.0かつ現行版が目的と不一致 | document-autocaptureの一部を限定移植 |
+| [background-removal-js](https://github.com/imgly/background-removal-js) | AGPL-3.0とモバイルモデル読込リスク | サーバー側rembg |
+
+## ライセンス対応
+
+- Wardrobeは直接コピーしない。参考commitだけを記録する。
+- document-autocaptureは限定移植するため、実装時にMIT本文・著作権・commitを`THIRD_PARTY_NOTICES.md`へ記載する。
+- rembg本体のMITと、BiRefNetモデル重みの条件を別々に記録する。

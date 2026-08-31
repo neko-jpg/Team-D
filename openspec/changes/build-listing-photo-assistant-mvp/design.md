@@ -1,87 +1,139 @@
 ## Context
 
-既存リポジトリは企画・要件・アーキテクチャ・OSS調査の Markdown 資料で構成されており、アプリケーション、API、依存関係、テスト基盤はまだ存在しない。提案の背景は `proposal.md`、利用者と外部システムが依存する振る舞いは `specs/guided-garment-capture/spec.md` と `specs/background-preserving-edit/spec.md` に定義する。
+既存リポジトリには企画資料と静的モックだけがあり、アプリ、API、依存、テスト基盤は存在しない。1日で、平置きトップス1着について、撮影中の助言、正面・背面・タグの撮影後確認、正面の背景生成・合成、承認までを一本のデモにする。
 
-実装はスマートフォンのブラウザから利用する React + TypeScript + Vite と、秘密情報を保持する Node.js API を一つの開発リポジトリに追加する。画像判定は構造化結果を返す画像 AI、背景分離は rembg／BiRefNet を候補とし、処理画像は MVP では永続化しない。2日間のハッカソンでデモを成立させるため、外部サービスが不安定でも同じ UI フローを確認できる決定的な fixture／mock provider を用意する。
+利用者から見える振る舞いは`specs/`、OSSのcommit・関数単位の採用境界はリポジトリルートの`architecture.md`を正とする。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- 正面・背面・タグの撮影を、判定・案内・撮り直し・進捗表示まで含む一本の垂直スライスとして動かす。
-- AI の出力を境界で検証し、画面遷移は有限なアプリ状態からのみ決定する。
-- 元画像と商品マスクを分離して扱い、選択背景との合成と明示的なユーザー承認を実現する。
-- PC の画像アップロード、外部 AI の fixture、スマートフォン実機カメラの順に検証できる構成にする。
-- API キー、サービス URL、処理画像のログをブラウザや通常ログへ露出しない。
+- 固定2Dガイドと端末内ライブ品質助言を表示する。
+- 撮影後AIのstrictな結果から正面、背面、タグを揃える。
+- 商品を含まない背景だけを生成し、正面原本の商品RGBを保持して合成する。
+- live providerと決定的fixtureの両方で完走できる。
+- 秘密値、rembgポート、処理画像を不用意に公開・永続化しない。
 
 **Non-Goals:**
 
-- ユーザー認証、データベース、ログイン後に再開できる永続セッション、Mercari の出品 API 連携。
-- 自動撮影、常時カメラ解析、半自動採寸、価格推定、着用画像／商品画像の生成。
-- 商品の再生成、レタッチ、色補正、傷や汚れを隠す編集。
-- 本番向けのマルチテナント運用、課金、監視基盤、全端末・全衣類カテゴリへの精度保証。
+- WebXR、ARKit、ARCore、平面検出、空間アンカー、衣類輪郭追跡。
+- ライブ映像の意味判定、連続クラウド送信、自動撮影。
+- 採寸、価格推定、Mercari API連携。
+- 商品再生成、人物着用生成、人物認識、商品レタッチ。
+- ユーザー認証、DB、永続ジョブ、本番監視、全端末対応。
 
 ## Decisions
 
-### 1. フロントエンドと API を分離し、開発時だけ Vite proxy で同一オリジンに見せる
+### 1. OSSは役割単位で採用し、アプリ全体をforkしない
 
-React の画面はカメラ／ファイル入力、セッション状態、背景選択、比較表示を担当し、Node.js API は画像 AI と背景分離サービスの資格情報および呼び出しを担当する。開発時は Vite の `/api` proxy で API を同一 URL に束ね、ngrok では Vite のポートだけを HTTPS 公開する。Vite の proxy は開発サーバー専用なので、本番相当の構成では環境変数で API の接続先を切り替える。
+| OSS | 決定 |
+|---|---|
+| Wardrobe | `normalizeImage`、Responses strict schema、review／approveの処理パターンだけ参考にし、コードコピーしない |
+| document-autocapture | カメラ制御、グレースケール、輝度、Laplacian分散、raw撮影を限定移植する |
+| rembg | v2.0.81のHTTP sidecarをloopbackで実行する |
+| BiRefNet | `birefnet-general-lite`をrembg経由でのみ使用する |
+| react-konva | 導入せず、native Canvas 2Dを使う |
+| XState | 導入せず、型付き`useReducer`を使う |
+| GarmentIQ | 採寸とともに除外する |
 
-Vite の外部端末テスト設定は `host` とトンネルのホスト名を明示し、`allowedHosts` や CORS を無制限にしない。Context7 で確認した公式方針どおり、`server.proxy` は `/api` の開発転送に限定し、`server.cors: true` のようにソース配布範囲まで広げる設定は避ける。
+詳細なファイル、関数、除外箇所、ライセンスは`architecture.md`の「OSS利用境界」に集約する。
 
-**代替案:** ブラウザから OpenAI や rembg を直接呼ぶ構成は、実装量は減るが API キー露出、CORS、外部端末からの制御不能を招くため採用しない。フロントと API を別々に公開する構成は本番には適するが、ハッカソンの実機接続を複雑にするため採用しない。
+**代替案:** Wardrobeまたはdocument-autocaptureを丸ごと導入すると、商品再生成、人物生成、書類検出、perspective warp、永続jobを外す作業が増えるため採用しない。
 
-### 2. 撮影フローは型付き Reducer と明示的な状態遷移で管理する
+### 2. ライブ判定と撮影後判定を分離する
 
-画面状態には、現在要求中のショット、各ショットの受け入れ済み元画像、判定中／エラー、編集可能状態を持たせる。イベントは「セッション開始」「画像送信」「判定成功」「判定失敗」「撮り直し」「編集開始」などに限定し、`missingShots` や `nextAction` は状態遷移の候補を補足する判定結果として扱う。実際に次のショットを決めるときは、受け入れ済みスロットからアプリ側で再計算する。
+`LiveCaptureAssessment`は固定ROIから端末内で作り、撮影前の助言だけに使う。
 
-AI の自由文を画面遷移やボタン種別として実行しない。`shotType`、`quality`、`issues`、`missingShots`、`nextAction` を API 境界で runtime schema により検証し、問題コードから UI の日本語説明を有限の辞書で生成する。これにより、AI が想定外の命令や未定義の状態を返しても撮影進捗を壊さない。
+```ts
+type LiveHint =
+  | "TOO_DARK"
+  | "TOO_BRIGHT"
+  | "TOO_BLURRY"
+  | "HOLD_STEADY"
+  | "READY"
+  | "ANALYZER_UNAVAILABLE";
+```
 
-**代替案:** XState は状態の可視化や複雑な並列状態に強いが、MVP の状態数では新しい依存と学習コストが増える。まず Reducer と遷移表を採用し、状態が増えた場合に XState へ移行できるようイベントと状態を純粋なドメイン型に分離する。
+- 固定ROIを最大辺320pxへ縮小する。
+- 初期値は輝度45〜215、Laplacian分散24以上、frame delta 0.020未満が600ms継続とする。
+- 通常4Hz、同時解析1、状態変化からUI反映p95 500ms以内を目標とする。
+- ライブ結果が`READY`でなくても手動撮影を許可する。
 
-### 3. 外部画像処理は provider 境界を置き、実サービスと fixture を切り替える
+`ShotAssessment`は撮影後に画像AIから取得し、写真の受理可否だけに使う。
 
-Node.js API に次の2つの論理 provider を置く。
+```ts
+type ShotAssessment = {
+  shotType: "front" | "back" | "tag" | "unknown";
+  quality: "ok" | "retry";
+  issues: string[];
+  missingShots: Array<"front" | "back" | "tag">;
+  nextAction: "RETAKE" | "REQUEST_NEXT" | "COMPLETE";
+};
+```
 
-- **Shot assessor:** 画像と現在の要求ショットを受け、許可された判定結果だけを返す。実 provider は画像 AI の構造化出力を使い、fixture provider は成功、撮り直し、誤ったショット、外部エラーを再現する。
-- **Garment masker:** 元画像を受け、商品マスクを PNG 等の画像データとして返す。実 provider は rembg HTTP server（初期候補 `birefnet-general-lite`）へ接続し、fixture は既知のサンプルマスクを返す。
+AIの自由文や`nextAction`を直接実行せず、受け入れ済みslotからReducerが次状態を再計算する。
 
-API の multipart 入力、MIME／サイズ、タイムアウト、上流エラーを一箇所で検証し、エラーは UI が再試行可能な有限カテゴリへ変換する。処理画像やプロンプト本文はログへ出さず、秘密値はサーバー専用環境変数から読む。fixture／mock は開発とテスト用の明示的なモードにし、本番相当の設定で自動的に成功扱いにならないようにする。
+### 3. 外部サービスはNode.jsのprovider境界に閉じる
 
-**代替案:** 画像 AI と rembg の SDK／HTTP 呼び出しを React コンポーネントへ直接埋め込むと、テストと秘密管理が難しくなるため採用しない。最初から外部 API だけに依存すると、ハッカソン当日のレート制限やモデル障害でデモ全体が止まるため fixture を併設する。
+- `ShotAssessor`: Responses APIへ撮影画像と指示を送り、strict schemaとruntime schemaで検証する。
+- `BackgroundGenerator`: 許可されたstyle IDを固定promptへ変換し、Images APIへテキストだけを送る。
+- `GarmentMasker`: rembg `/api/remove`へ`file`、`model=birefnet-general-lite`、`om=true`を送り、PNG maskを検証する。
 
-### 4. 商品保持を保証する合成パイプラインにする
+各providerはfixture実装を持つ。`PROVIDER_MODE`で明示的に切り替え、live失敗を自動成功へ変換しない。
 
-背景編集では、元画像、商品マスク、背景画像を別レイヤーとして保持する。フロントエンドは元画像の商品 RGB を前景に使い、マスク外を選択背景で埋める。プレビューと出力の両方で元画像を再生成サービスへ渡さず、編集後画像を初期承認状態にしない。MVP の背景候補はローカルで管理する固定プリセット（白、木目、グレー等）に限定し、カスタム背景は後続拡張とする。
+**代替案:** ブラウザから外部APIを直接呼ぶ構成は、秘密値、CORS、rembgのCORS `*`、端末差分を制御できないため採用しない。
 
-比較画面は元画像と編集後画像を同じ表示領域で切り替えられる構成にし、採用操作と元画像採用操作を分ける。マスク失敗時は編集画像を出力可能にせず、元画像の確認または再試行へ戻す。
+### 4. 商品を含まない背景だけを生成する
 
-**代替案:** 商品画像を生成 AI に渡して背景込みで再生成すると見た目は整えやすいが、柄・色・傷・汚れが変わるため要件に反する。ブラウザ内モデルで完全に背景除去すると API は減るが、モバイルのモデル読込とメモリがデモの不安定要因になるため、MVP ではサーバー側 rembg を優先する。
+背景生成APIへ商品画像を渡さない。生成promptは「空の撮影背景、真上視点、均一照明、人物・衣類・ハンガー・文字・ロゴなし」に限定し、失敗時は同梱の固定背景を使う。
 
-### 5. 検証は純粋ロジック、API 契約、実機の三層に分ける
+正面原本はrembgへ送り、mask-onlyを取得する。商品前景は元画像RGBへmaskを適用して作る。
 
-- Reducer と判定結果 validator は fixture で網羅し、撮り直し時に他の受け入れ済み画像が保持されること、`COMPLETE` が3種類すべての成功後にしか発生しないことを確認する。
-- API は外部 provider を差し替えた契約テストで、正常応答、形式不正、タイムアウト、画像処理失敗を確認する。
-- Playwright は保存済み画像によるハッピーパスと失敗復帰を自動化し、カメラ権限・HTTPS・画像の見た目は iPhone Safari または Android Chrome の実機 smoke test で確認する。
+```text
+background text → Images API → background
+front original → rembg → mask
+front original RGB × mask → foreground
+background + foreground → Canvas preview → approval → output
+```
+
+合成はnative Canvas 2Dの`drawImage`、`destination-in`、`toBlob`で行う。位置調整を要件に含めないためreact-konvaは使わない。
+
+### 5. 直列状態は型付きReducerで管理する
+
+```text
+CAPTURE(front) → ANALYZING → RETAKE|ACCEPT
+→ CAPTURE(back) → ANALYZING
+→ CAPTURE(tag) → ANALYZING
+→ READY_TO_EDIT → MASKING + GENERATING_BACKGROUND
+→ PREVIEW → APPROVAL → DONE
+```
+
+各slotは原本Blob、object URL、判定結果を持つ。失敗時は現在stepと受け入れ済みslotを変更しない。終了時にobject URLを解放する。
+
+### 6. デモは最初にfixtureで縦スライスを通す
+
+開始時にfront／back／tag、撮り直し、誤種別、AIエラー、mask、固定背景のfixtureを用意する。uploadで全体を通してからカメラ、live AI、rembg、背景生成を順に接続する。
+
+rembgはPython 3.11、v2.0.81、`birefnet-general-lite`を固定し、デモ前にモデルをdownloadしてfixture frontを1回処理する。初期timeoutはanalyze 20秒、rembg 35秒、背景生成60秒とする。
 
 ## Risks / Trade-offs
 
-- **[外部 AI／rembg の遅延・障害]** → タイムアウトを有限時間で返し、進捗を変更しない。fixture provider とサンプル画像で完全なデモ経路を再現する。
-- **[衣類の種類や撮影条件による判定誤り]** → MVP の対象を平置き衣類の正面・背面・タグに限定し、AI が `unknown` または `retry` を返した場合は受け入れない。品質閾値はサンプル画像で調整する。
-- **[マスクが袖や細部を欠損させる]** → 商品マスクを承認前に確認できるようにし、元画像を常に別レイヤーで保持する。マスク不成立時は編集結果を確定できない。
-- **[スマートフォンのカメラ／HTTPS 差異]** → カメラ入力にファイルアップロードのフォールバックを用意し、PC・実機・ブラウザ別に最低限の smoke test を行う。
-- **[Vite トンネル公開による意図しないアクセス]** → ngrok の HTTPS URL を開発時だけ利用し、トンネルホストを明示的に許可する。API キーはブラウザへ出さず、CORS と allowed host の無制限設定を避ける。
-- **[元画像の機密性・ログ流出]** → 画像を永続保存せず、リクエスト後に一時データを解放する。リクエスト本文、base64、プロンプト、資格情報を通常ログへ出力しない。
-- **[2日間での過剰スコープ]** → 採寸、自動撮影、価格推定、Mercari 連携、カスタム背景を受け入れ条件から外し、まず fixture で垂直スライスを完成させる。
+- **[ライブ品質判定が無地衣類で不安定]** → 助言に限定し、手動撮影と撮影後AIを優先する。
+- **[object-fitでROIがずれる]** → 表示座標から映像座標への変換を純粋関数としてテストする。
+- **[外部AIまたはrembgが遅い]** → timeout、明示的retry、固定背景、原本採用、fixtureを用意する。
+- **[maskが袖や裾を欠く]** → 空／全面／寸法を検査し、承認前比較と元画像採用を必須にする。
+- **[OSSライセンスを落とす]** → document-autocapture限定移植時にMIT全文、著作権、commit、出典コメントを追加する。
+- **[1日で過剰になる]** → 背景処理は正面1枚だけ。人物生成、採寸、自動撮影、位置調整を追加しない。
 
 ## Migration Plan
 
-既存のアプリやデータベースがないため、データ移行は発生しない。既存 Markdown 資料を変更せず、以下の順で新規アプリを追加する。
+既存実装や永続データはないため移行は発生しない。
 
-1. React／TypeScript／Vite、Node.js API、共有ドメイン型、環境変数のサンプルを作成する。
-2. fixture provider と Reducer を先に実装し、保存済み画像の撮影フローを完成させる。
-3. 実画像 AI provider と rembg provider を追加し、API 境界の契約テストを通す。
-4. マスク合成、背景選択、比較、承認、画像出力を接続する。
-5. PC の自動テスト後、rembg と Vite を起動し、ngrok の HTTPS URL から実機 smoke test を行う。
+1. fixture、Reducer、uploadで3枚の撮影ループを完成させる。
+2. カメラ、固定ガイド、端末内ライブ判定を接続する。
+3. liveの`ShotAssessor`を接続する。
+4. rembgをprewarmし、正面maskを接続する。
+5. 背景生成、Canvas合成、比較、承認、保存を接続する。
+6. 基準端末とfixtureで垂直スライスを確認する。
 
-デモ時に外部サービスの資格情報または rembg が利用できない場合は、明示的な fixture モードへ切り替える。ロールバックは新規アプリの利用を停止して既存資料だけを残すことで行え、永続データやスキーマの巻き戻しは不要である。
+ロールバックはlive providerを停止し、明示的なfixtureモードへ切り替える。撮影済み進捗を黙って成功扱いにはしない。
