@@ -54,7 +54,7 @@ LiveKit Room
   ▼
 Python LiveKit Agent
   ├─ video track subscription / latest-frame slot
-  ├─ SemanticGuidanceProcessor → video対応AI provider
+  ├─ SemanticGuidanceProcessor → OpenAI Realtime provider
   └─ GuidanceStateMachine
        │ lossy data packet: 短命な助言
        │ reliable packet / RPC: step・受理・再同期
@@ -64,7 +64,7 @@ React AR overlay / CaptureReducer
 
 ハッカソンではSFUの構築時間を省くためLiveKit Cloudを使う。ブラウザはPython FastAPIから短命tokenを取得し、camera trackをRoomへpublishする。Agentはparticipantとしてjoinしてtrackへsubscribeする。この境界はLiveKit OSS SDKに閉じるため、後からself-host serverへ切り替えてもUIとAgentの契約は変わらない。
 
-LiveKit Agentsは映像transportとAgent lifecycleを提供するが、衣類の意味判定モデルではない。`SemanticGuidanceProcessor`がframe arrivalを起点にvideo対応AI providerを呼び、結果を有限な`GuidanceEvent`へ正規化する。
+LiveKit Agentsは映像transportとAgent lifecycleを提供するが、衣類の意味判定モデルではない。`SemanticGuidanceProcessor`がframe arrivalを起点にOpenAI Realtime providerを呼び、結果を有限な`GuidanceEvent`へ正規化する。
 
 設計原則は「リアルタイム性は前処理とアーキテクチャ、意味判断の精度はAIモデル」とする。
 
@@ -75,7 +75,27 @@ LiveKit Agentsは映像transportとAgent lifecycleを提供するが、衣類の
 | 衣類の収まり、距離、表裏、タグ移動の意味判定 | `VisionGuidanceProvider`だけが依存 |
 | 有限コード化、固定文言、dedupe、sequence、expiry、画面遷移 | しない |
 
-画像AIは30fpsの全frameを監視しない。Agentのselectorが現在shotの変更、静止、sampling上限から最新frame 1枚を選び、`requestedShot`と前回codeを添えてproviderへ渡す。providerは有限なcodeとconfidenceだけを返し、自由文でUIや遷移を決めない。この契約によりprovider交換時もLiveKit、Reducer、AR overlayを変更しない。
+OpenAI Realtimeはvideo入力ではなくimage入力を扱うため、30fpsの全frameを直接モデルへ渡さない。Agentのselectorが現在shotの変更、静止、sampling上限から最新frame 1枚を選び、最大辺320px以下のJPEGへ縮小してproviderへ渡す。providerは有限なcodeだけを返し、backendがruntime validation、固定文言、confidenceの正規化を行う。自由文でUIや遷移を決めない。この契約によりprovider交換時もLiveKit、Reducer、AR overlayを変更しない。
+
+#### 2.1 OpenAI Realtime sessionを撮影セッション中は再利用する
+
+```text
+LiveKit camera track
+  → latest-frame slot (capacity 1)
+  → resize / JPEG encode (max 320px)
+  → one persistent OpenAI Realtime WebSocket
+      → out-of-band response (`conversation: none`)
+      → exact finite code only
+  → runtime validation / dedupe / LiveKit push
+```
+
+- Agent起動またはRoom join時にRealtime WebSocketをprewarmし、frameごとにTLS／WebSocket／sessionを作り直さない。
+- 各frame判定は会話へ追加せず、`conversation: none`のout-of-band responseとして画像1枚と現在shotの短い固定指示だけを送る。過去frame、過去code、過去responseをmodel contextへ蓄積しない。
+- Realtime modelはstructured outputsを提供しないため、出力をshotごとの有限code 1個だけに制限し、backendのallowlistで完全一致を検証する。UI文言は既存のbackend固定mapから作る。
+- response出力は最小token数に制限する。deadlineは950ms以下とし、期限超過はcancelまたは破棄して`AGENT_UNAVAILABLE`へ正規化する。
+- providerは同時response 1件、待機frame 1件とする。新しいframe到着時は中間frameを破棄し、shot generationが変わったresponseをpublishしない。
+- WebSocket切断時だけ有限回再接続し、再接続完了までは固定ガイド、端末内品質助言、手動撮影を残す。frame判定失敗をResponses APIへ自動fallbackして1秒SLOを破らない。
+- default modelはimage input対応の低遅延Realtime modelを実測して選び、環境変数で固定する。model変更時も実credential 20件以上の性能ゲートを再実行する。
 
 ```ts
 type GuidanceEvent = {
@@ -104,8 +124,11 @@ type GuidanceEvent = {
 ```
 
 - Agentはbuffer capacity 1、意味判定同時1件とし、処理中に届いた中間frameをcoalesceする。
-- 意味判定は1〜2fpsを上限にする。clientの定期HTTP pollingではなく、継続中のWebRTC trackへbackpressureを掛ける。
+- 意味判定は最大4Hzのframe選択を許可するが、同時response 1件と最新frame 1件で自然にbackpressureを掛ける。clientの定期HTTP pollingは使わない。
 - 同一shot／codeは変化時だけlossy packetで送り、step変更、撮影受理、再同期はreliable packetまたはRPCで送る。
+- 同一shot／codeの継続判定は表示eventとして再送しない。接続の生存確認は助言eventと分離したheartbeat packetで伝え、UIの主文言を再描画させない。
+- frontendからのshot変更は有限なcommand schemaで受信し、保留frameへ観測時のshotとgenerationを束縛する。Agent再起動時はprocess epoch付きsnapshotを使い、同じRoom名でsequenceが再開しても旧processと混同させない。
+- live providerには950ms以下のdeadlineを設け、timeout／errorは`AGENT_UNAVAILABLE`へ正規化して未処理例外を残さない。
 - frontendはsession、shot、sequence、expiryを検査し、古い結果で表示や状態を巻き戻さない。
 - Agent切断時は再接続表示へ切り替え、固定ガイド、端末内品質判定、手動撮影を残す。
 
@@ -147,7 +170,7 @@ type ShotAssessment = {
 
 ### 4. Python backendのprovider境界に外部サービスを閉じる
 
-- `VisionGuidanceProvider`: Agent内でvideo frameと現在shotを受け、有限な意味判定を返す。
+- `VisionGuidanceProvider`: Agent内でvideo frameと現在shotを受け、撮影セッション中に再利用するOpenAI Realtime WebSocketから有限な意味判定を返す。
 - `ShotAssessor`: Responses APIへ撮影画像と指示を送り、strict schemaとruntime schemaで検証する。
 - `MeasurementLineProvider`: 射影補正済みの採寸解析コピーを受け、着丈・身幅の4端点だけを0〜1の正規化座標で返す。cm値と画面遷移は返さない。
 - `BackgroundGenerator`: 許可されたstyle IDを固定promptへ変換し、Images APIへテキストだけを送る。
@@ -221,11 +244,11 @@ CONNECTING_LIVE → CAPTURE(front) ⇄ LIVE_GUIDANCE
 
 開始時にfront／back／tag／measurement、正常・欠け・重なり・遠近歪みのマーカー、既知縮尺と測定線、撮り直し、誤種別、順序逆転／期限切れの`GuidanceEvent`、Agent切断、AIエラー、mask、固定背景のfixtureを用意する。uploadで全体を通してからLiveKit Room、Agent、live AI、OpenCV.js、rembg、背景生成を順に接続する。
 
-rembgはPython 3.11、v2.0.81、`birefnet-general-lite`を固定し、デモ前にモデルをdownloadしてfixture frontを1回処理する。初期timeoutはanalyze 20秒、rembg 35秒、背景生成60秒とする。
+rembgはPython 3.11、v2.0.81、`birefnet-general-lite`を固定し、デモ前にモデルをdownloadしてfixture frontを1回処理する。mask寸法はEXIF orientation適用後の解析寸法と比較し、backend-only検証用には元RGBへmaskをalpha適用したRGBA PNG previewも返せるようにする。初期timeoutはanalyze 20秒、live guidanceは950ms以下の設定可能なdeadline、rembg 35秒、背景生成60秒とする。live guidanceは実OpenAI credentialでウォーム状態の成功20件以上、error 0件、`observedAt→backend publish` p95 1,000ms未満を必須ゲートとし、Realtime接続時間はcold-startとして別記録する。
 
 ## Risks / Trade-offs
 
-- **[ライブ意味判定が遅い／揺れる]** → 最新frame 1件、同時推論1、期限、dedupeを設け、助言に限定して撮影後AIを最終判定にする。
+- **[ライブ意味判定が遅い／揺れる]** → Realtime sessionをprewarm・再利用し、入力画像とpromptと出力tokenを最小化する。最新frame 1件、同時推論1、950ms以下の期限、dedupeを設け、実credential 20件のp95が1秒未満になるまでmodelと画像条件を調整する。合格しないproviderを本番live経路として採用しない。
 - **[LiveKit／Agentが切断する]** → 再接続状態を明示し、端末内品質助言、手動撮影、受け入れ済みslotを維持する。
 - **[object-fitでROIがずれる]** → 表示座標から映像座標への変換を純粋関数としてテストする。
 - **[外部AIまたはrembgが遅い]** → timeout、明示的retry、固定背景、原本採用、fixtureを用意する。

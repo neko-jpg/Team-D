@@ -22,6 +22,7 @@ from backend.providers.vision_guidance import (
     validate_guidance_input,
     validate_guidance_shot,
     validate_vision_decision,
+    validate_vision_decision_for_shot,
 )
 
 
@@ -76,14 +77,16 @@ class GuidanceEvent:
     observed_at: int
     expires_at: int
     transport: TransportKind = TransportKind.LOSSY
+    process_epoch: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "session_id", _non_empty(self.session_id, "sessionId"))
         if isinstance(self.sequence, bool) or not isinstance(self.sequence, int) or self.sequence < 1:
             raise GuidanceContractError("sequence must be a positive integer")
         object.__setattr__(self, "shot", validate_guidance_shot(self.shot))
-        decision = validate_vision_decision(
-            {"code": self.code, "confidence": self.confidence}
+        decision = validate_vision_decision_for_shot(
+            {"code": self.code, "confidence": self.confidence},
+            self.shot,
         )
         object.__setattr__(self, "code", decision.code)
         object.__setattr__(self, "confidence", decision.confidence)
@@ -96,6 +99,12 @@ class GuidanceEvent:
         object.__setattr__(self, "expires_at", expires_at)
         if self.transport is not TransportKind.LOSSY:
             raise GuidanceContractError("guidance events must use lossy transport")
+        if self.process_epoch is not None:
+            object.__setattr__(
+                self,
+                "process_epoch",
+                _non_empty(self.process_epoch, "processEpoch"),
+            )
 
     @property
     def sessionId(self) -> str:
@@ -115,7 +124,7 @@ class GuidanceEvent:
     def to_payload(self) -> dict[str, object]:
         """Return the exact GuidanceEvent wire shape from architecture.md."""
 
-        return {
+        payload: dict[str, object] = {
             "sessionId": self.session_id,
             "sequence": self.sequence,
             "shot": self.shot.value,
@@ -125,6 +134,9 @@ class GuidanceEvent:
             "observedAt": self.observed_at,
             "expiresAt": self.expires_at,
         }
+        if self.process_epoch is not None:
+            payload["processEpoch"] = self.process_epoch
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +150,7 @@ class GuidanceStateEvent:
     code: GuidanceCode | None
     observed_at: int
     transport: TransportKind = TransportKind.RELIABLE
+    process_epoch: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "session_id", _non_empty(self.session_id, "sessionId"))
@@ -156,9 +169,15 @@ class GuidanceStateEvent:
         object.__setattr__(self, "observed_at", _timestamp(self.observed_at, "observedAt"))
         if self.transport is not TransportKind.RELIABLE:
             raise GuidanceContractError("state events must use reliable transport")
+        if self.process_epoch is not None:
+            object.__setattr__(
+                self,
+                "process_epoch",
+                _non_empty(self.process_epoch, "processEpoch"),
+            )
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "type": self.kind,
             "sessionId": self.session_id,
             "sequence": self.sequence,
@@ -166,6 +185,49 @@ class GuidanceStateEvent:
             "code": None if self.code is None else self.code.value,
             "observedAt": self.observed_at,
         }
+        if self.process_epoch is not None:
+            payload["processEpoch"] = self.process_epoch
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class GuidanceHeartbeat:
+    """Lossy liveness signal which never asks the UI to redraw its advice."""
+
+    session_id: str
+    sequence: int
+    shot: GuidanceShot | None
+    observed_at: int
+    process_epoch: str | None = None
+    transport: TransportKind = TransportKind.LOSSY
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "session_id", _non_empty(self.session_id, "sessionId"))
+        if isinstance(self.sequence, bool) or not isinstance(self.sequence, int) or self.sequence < 1:
+            raise GuidanceContractError("sequence must be a positive integer")
+        if self.shot is not None:
+            object.__setattr__(self, "shot", validate_guidance_shot(self.shot))
+        object.__setattr__(self, "observed_at", _timestamp(self.observed_at, "observedAt"))
+        if self.process_epoch is not None:
+            object.__setattr__(
+                self,
+                "process_epoch",
+                _non_empty(self.process_epoch, "processEpoch"),
+            )
+        if self.transport is not TransportKind.LOSSY:
+            raise GuidanceContractError("heartbeat events must use lossy transport")
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "type": "heartbeat",
+            "sessionId": self.session_id,
+            "sequence": self.sequence,
+            "shot": None if self.shot is None else self.shot.value,
+            "observedAt": self.observed_at,
+        }
+        if self.process_epoch is not None:
+            payload["processEpoch"] = self.process_epoch
+        return payload
 
 
 Clock: TypeAlias = Callable[[], int]
@@ -180,6 +242,7 @@ class GuidanceStateMachine:
         *,
         clock: Clock | None = None,
         guidance_ttl_ms: int = 2_000,
+        process_epoch: str | None = None,
     ) -> None:
         self._session_id = _non_empty(session_id, "sessionId")
         self._clock = clock or (lambda: int(time.time() * 1_000))
@@ -190,6 +253,9 @@ class GuidanceStateMachine:
         ):
             raise GuidanceContractError("guidance_ttl_ms must be a positive integer")
         self._guidance_ttl_ms = guidance_ttl_ms
+        self._process_epoch = (
+            None if process_epoch is None else _non_empty(process_epoch, "processEpoch")
+        )
         self._sequence = 0
         self._shot: GuidanceShot | None = None
         self._code: GuidanceCode | None = None
@@ -202,6 +268,10 @@ class GuidanceStateMachine:
     @property
     def sequence(self) -> int:
         return self._sequence
+
+    @property
+    def process_epoch(self) -> str | None:
+        return self._process_epoch
 
     def _now(self, value: object | None = None) -> int:
         return _timestamp(self._clock() if value is None else value, "observedAt")
@@ -218,7 +288,7 @@ class GuidanceStateMachine:
         observed_at: object | None = None,
     ) -> GuidanceEvent | None:
         shot_value = validate_guidance_shot(shot)
-        decision_value = validate_vision_decision(decision)
+        decision_value = validate_vision_decision_for_shot(decision, shot_value)
         key = (shot_value, decision_value.code)
         if key == self._last_key:
             return None
@@ -233,6 +303,7 @@ class GuidanceStateMachine:
             confidence=decision_value.confidence,
             observed_at=now,
             expires_at=now + self._guidance_ttl_ms,
+            process_epoch=self._process_epoch,
         )
         self._shot = shot_value
         self._code = decision_value.code
@@ -273,6 +344,7 @@ class GuidanceStateMachine:
             shot=self._shot,
             code=self._code,
             observed_at=now,
+            process_epoch=self._process_epoch,
         )
 
     def resync(self, *, observed_at: object | None = None) -> GuidanceStateEvent:
@@ -284,12 +356,25 @@ class GuidanceStateMachine:
             shot=self._shot,
             code=self._code,
             observed_at=now,
+            process_epoch=self._process_epoch,
+        )
+
+    def heartbeat(self, *, observed_at: object | None = None) -> GuidanceHeartbeat:
+        """Allocate a liveness sequence without changing display guidance state."""
+
+        return GuidanceHeartbeat(
+            session_id=self._session_id,
+            sequence=self._next_sequence(),
+            shot=self._shot,
+            observed_at=self._now(observed_at),
+            process_epoch=self._process_epoch,
         )
 
 
 __all__ = [
     "GUIDANCE_MESSAGES",
     "GuidanceEvent",
+    "GuidanceHeartbeat",
     "GuidanceStateEvent",
     "GuidanceStateMachine",
     "GuidanceValidationError",

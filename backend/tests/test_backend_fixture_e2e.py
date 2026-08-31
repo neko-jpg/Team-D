@@ -57,7 +57,7 @@ def _png_image() -> bytes:
 def _mask_png() -> bytes:
     output = BytesIO()
     mask = Image.new("L", IMAGE_SIZE, 0)
-    mask.putpixel((IMAGE_SIZE[0] // 2, IMAGE_SIZE[1] // 2), 255)
+    mask.paste(255, (1, 1, 6, 4))
     mask.save(output, format="PNG")
     return output.getvalue()
 
@@ -154,7 +154,10 @@ async def _run_agent_guidance(image: bytes) -> dict[str, object]:
     runtime = await entrypoint(
         FixtureAgentContext(FixtureRoom(publisher)),
         inference=create_provider_inference(provider),
-        transport_factory=agent.build_transport_factory(provider),
+        transport_factory=agent.build_transport_factory(
+            provider,
+            process_epoch="backend-fixture-e2e-process",
+        ),
         observation_clock=lambda: 1_000,
     )
     processor = runtime.subscriber.processor
@@ -308,6 +311,7 @@ def test_fixture_backend_e2e_is_identical_across_two_consecutive_runs() -> None:
                 "shot": "front",
                 "code": None,
                 "observedAt": 1_000,
+                "processEpoch": "backend-fixture-e2e-process",
             },
             "reliable": True,
         },
@@ -321,6 +325,7 @@ def test_fixture_backend_e2e_is_identical_across_two_consecutive_runs() -> None:
                 "confidence": 1.0,
                 "observedAt": 1_000,
                 "expiresAt": 3_000,
+                "processEpoch": "backend-fixture-e2e-process",
             },
             "reliable": False,
         },

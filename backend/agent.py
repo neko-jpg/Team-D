@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
@@ -27,6 +28,7 @@ from .settings import BackendSettings
 
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_GUIDANCE_DEADLINE_SECONDS = 0.95
 
 AgentRunner = Callable[[Any], Any]
 ServerFactory = Callable[..., Any]
@@ -73,8 +75,15 @@ def _guidance_session_id(room: Any) -> str:
 
 def build_transport_factory(
     provider: VisionGuidanceProvider,
+    *,
+    process_epoch: str | None = None,
+    provider_deadline_seconds: float = DEFAULT_GUIDANCE_DEADLINE_SECONDS,
 ) -> TransportFactory:
     """Bind a Room's local participant to shot-aware provider inference."""
+
+    resolved_process_epoch = (
+        uuid.uuid4().hex if process_epoch is None else process_epoch
+    )
 
     def factory(
         room: Any,
@@ -83,10 +92,14 @@ def build_transport_factory(
         publisher = getattr(room, "local_participant", None)
         if publisher is None:
             raise RuntimeError("LiveKit room has no local participant for guidance")
+        session_factory = getattr(provider, "new_session", None)
+        session_provider = session_factory() if callable(session_factory) else provider
         return GuidanceTransportAdapter(
-            create_provider_inference(provider, requested_shot=current_shot),
+            create_provider_inference(session_provider, requested_shot=current_shot),
             publisher,
             session_id=_guidance_session_id(room),
+            process_epoch=resolved_process_epoch,
+            provider_deadline_seconds=provider_deadline_seconds,
         )
 
     return factory
@@ -188,6 +201,7 @@ __all__ = [
     *[name for name in _live_agent.__all__ if name != "main"],
     "build_runtime_provider",
     "build_transport_factory",
+    "DEFAULT_GUIDANCE_DEADLINE_SECONDS",
     "check_agent",
     "main",
     "run_agent_worker",

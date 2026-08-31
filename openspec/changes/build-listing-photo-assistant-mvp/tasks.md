@@ -56,7 +56,7 @@
 ### 第3章完了ゲート
 
 - [ ] 3.16 【友ちゃんさん・徹平さん・健太さん】fixture transportで正常、撮り直し、判定timeout、measurement未承認、古いevent、resize／回転、切断／再接続、解析不可、権限拒否を順に実行し、撮影済みBlob hash、現在step、採寸状態が不正に変わらず、4slot＋明示承認が揃う前はeditへ進めないことを1コマンドの回帰テストで確認する
-- [ ] 3.17 【健太さん】基準iPhoneで端末内品質解析を4Hz／同時解析1、Agent意味判定を同時1で計測し、状態変化からUI表示までp95 500ms以内、`observedAt`からAI助言表示までp95 2秒以内、待機queue最大1、console未処理error 0件をログへ記録し、目標外でもqueueを増やさないことを確認する
+- [ ] 3.17 【健太さん】基準iPhoneで端末内品質解析を4Hz／同時解析1、Agent意味判定を同時1で計測し、状態変化からUI表示までp95 500ms以内、prewarm済みの実OpenAI Realtimeで`observedAt`からAI助言表示までp95 1秒未満、待機queue最大1、provider／console未処理error 0件をログへ記録する
 
 ## 4. 撮影後AI判定
 
@@ -104,3 +104,16 @@
 - [ ] 8.6 【健太さん】LiveKit／Agent起動、OpenCV.js／WASM事前load、50mmマーカー印刷・実測、rembg prewarm、`/api/health`、`PROVIDER_MODE=fixture|live`切替、各timeoutと切断からの復旧手順をコピー可能なコマンドと期待結果付きでrunbookへ記載し、新しいterminal sessionから手順どおり再実行する
 - [ ] 8.7 【健太さん】lockfileからclean installした環境でfrontend／Python backend／Agentを起動し、`npm run build`、`npm run typecheck`、frontend／Pythonのunit・contract・integration・E2E testを実行して失敗0件、browser console未処理error 0件を確認する
 - [ ] 8.8 【友ちゃんさん】runbookへ全Requirement／Scenarioとtask番号、test名または実機確認手順の対応表を追加し、未対応Scenarioが0件であることを確認したうえで、`openspec validate "build-listing-photo-assistant-mvp" --type change --strict --no-interactive`を成功させる
+
+## 9. Backend P0/P1 hardening
+
+- [x] 9.1 【友ちゃんさん】LiveKit data command／RPCから有限schemaのshot変更を`AgentRuntime.set_shot`へ接続し、観測時shot generationで保留frameを隔離し、Agent再起動時のprocess epoch付きreliable snapshotを契約テストで確認する
+- [x] 9.2 【友ちゃんさん】同一shot／codeの表示event dedupeとliveness heartbeatを分離し、live providerへ有限deadlineを設定してtimeout／errorを`AGENT_UNAVAILABLE`へ正規化し、未処理例外0件をテストする
+- [x] 9.3 【友ちゃんさん】shot別guidance code allowlistと`ShotAssessment`のrequested shot／quality／issues／nextAction整合性をruntime検証し、矛盾したAI結果で進捗が変わらない契約テストを通す
+- [x] 9.4 【友ちゃんさん】EXIF orientation適用後の解析寸法でmaskを検証し、正面原本RGBへmaskをalpha適用したRGBA PNG preview endpointと、透明／不透明領域およびmask面積のsanity testを実装する
+- [x] 9.5 【健太さん】fixture frameだけで`observedAt→provider完了→backend publish`、同時推論数、queue深度、同一判定の表示event数を計測するbackend-only回帰テストを1コマンド化し、fixture p95 1秒以内を必須、任意のlive credentialsではp50／p95と1秒／2秒目標の判定を出力する
+- [x] 9.6 【友ちゃんさん】OpenAI公式仕様に基づき、live guidanceをframeごとのResponses APIから、image input対応Realtime modelの単一WebSocket、prewarm、`conversation: none`、有限code完全一致、950ms以下deadlineへ設計変更し、OpenSpec strict validationを通す
+- [x] 9.7 【友ちゃんさん】撮影セッション中に再利用するRealtime providerを実装し、接続確立、独立response、有限code validation、timeout／cancel、切断時再接続、明示closeを偽WebSocketの契約テストで確認する
+- [x] 9.8 【友ちゃんさん】Agent workerへRealtime providerのprewarm／close lifecycleを接続し、同時response 1件、待機frame 1件、shot generation変更時の旧result破棄、同一codeの表示event抑制を統合テストで確認する
+- [x] 9.9 【健太さん】backend-only verifierをRealtimeの同一session再利用へ対応させ、cold-startと`observedAt→provider完了→backend publish`を分離し、fixture gateとlive 20件以上のp50／p95／error数を1コマンドで出力する
+- [x] 9.10 【友ちゃんさん・健太さん】実`OPENAI_API_KEY`で低遅延Realtime model、最大辺、JPEG品質、prompt、出力tokenを反復比較し、成功20件以上、error 0件、ウォーム状態の`observedAt→backend publish` p95 1,000ms未満を満たす組合せをproduction defaultへ固定して計測結果を記録する

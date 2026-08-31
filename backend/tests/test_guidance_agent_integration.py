@@ -352,7 +352,15 @@ class GuidanceAgentIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen_shots, ["back"])
         self.assertEqual(
             [(payload.get("type", "guidance"), payload["shot"], reliable) for payload, reliable in publisher.calls],
-            [("shot_changed", "back", True), ("guidance", "back", False)],
+            [
+                ("shot_changed", "front", True),
+                ("shot_changed", "back", True),
+                ("guidance", "back", False),
+            ],
+        )
+        self.assertEqual(
+            len({payload["processEpoch"] for payload, _ in publisher.calls}),
+            1,
         )
         self.assertEqual(publisher.calls[-1][0]["code"], GuidanceCode.READY.value)
 
@@ -381,11 +389,13 @@ class GuidanceAgentIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         provider = agent.build_runtime_provider(settings)
         publisher = FailingOncePublisher()
+        publisher._fail_reliable = False
         runtime = await entrypoint(
             Context(Room(publisher)),
             inference=create_provider_inference(provider),
             transport_factory=agent.build_transport_factory(provider),
         )
+        publisher._fail_reliable = True
 
         with self.assertRaisesRegex(RuntimeError, "reliable packet unavailable"):
             await runtime.set_shot("back")
@@ -399,10 +409,11 @@ class GuidanceAgentIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(publisher.calls[-1][0], {
             "type": "resync",
             "sessionId": "capture-session",
-            "sequence": 2,
+            "sequence": 3,
             "shot": "back",
             "code": None,
             "observedAt": publisher.calls[-1][0]["observedAt"],
+            "processEpoch": runtime.guidance_transport.process_epoch,
         })
 
         self.assertTrue(runtime.subscriber.processor.submit_nowait(b"back-frame"))

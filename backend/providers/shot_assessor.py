@@ -164,6 +164,7 @@ class ShotAssessment:
             _finite_enum_list(list(self.missing_shots), RequestedShot, "missingShots"),
         )
         object.__setattr__(self, "next_action", validate_next_action(self.next_action))
+        _validate_assessment_invariants(self)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> "ShotAssessment":
@@ -196,6 +197,77 @@ def validate_shot_assessment(value: object) -> ShotAssessment:
     if isinstance(value, Mapping):
         return ShotAssessment.from_mapping(value)
     raise ShotAssessmentContractError("shot assessment must be an object")
+
+
+_MISSING_AFTER_ACCEPT: Mapping[RequestedShot, tuple[RequestedShot, ...]] = {
+    RequestedShot.FRONT: (RequestedShot.BACK, RequestedShot.TAG),
+    RequestedShot.BACK: (RequestedShot.TAG,),
+    RequestedShot.TAG: (),
+}
+
+
+def _validate_assessment_invariants(assessment: ShotAssessment) -> None:
+    if len(set(assessment.issues)) != len(assessment.issues):
+        raise ShotAssessmentContractError("issues must not contain duplicates")
+    if len(set(assessment.missing_shots)) != len(assessment.missing_shots):
+        raise ShotAssessmentContractError("missingShots must not contain duplicates")
+
+    if assessment.quality is ShotQuality.OK:
+        if assessment.shot_type is AssessedShotType.UNKNOWN:
+            raise ShotAssessmentContractError("quality=ok requires a known shotType")
+        if assessment.issues:
+            raise ShotAssessmentContractError("quality=ok requires empty issues")
+        expected_action = (
+            NextAction.COMPLETE
+            if assessment.shot_type is AssessedShotType.TAG
+            else NextAction.REQUEST_NEXT
+        )
+        if assessment.next_action is not expected_action:
+            raise ShotAssessmentContractError(
+                f"quality=ok for {assessment.shot_type.value} requires {expected_action.value}"
+            )
+        return
+
+    if not assessment.issues:
+        raise ShotAssessmentContractError("quality=retry requires at least one issue")
+    if assessment.next_action is not NextAction.RETAKE:
+        raise ShotAssessmentContractError("quality=retry requires RETAKE")
+
+
+def validate_shot_assessment_for_requested_shot(
+    value: object,
+    requested_shot: object,
+) -> ShotAssessment:
+    """Reject model output that is valid JSON but unsafe for this capture step."""
+
+    requested = validate_requested_shot(requested_shot)
+    assessment = validate_shot_assessment(value)
+    expected_missing = _MISSING_AFTER_ACCEPT[requested]
+
+    if assessment.quality is ShotQuality.OK:
+        if assessment.shot_type.value != requested.value:
+            raise ShotAssessmentContractError(
+                "quality=ok requires shotType to match requestedShot"
+            )
+        if assessment.missing_shots != expected_missing:
+            raise ShotAssessmentContractError(
+                "quality=ok requires the fixed remaining-shot sequence"
+            )
+        return assessment
+
+    expected_retry_missing = (requested, *expected_missing)
+    if assessment.missing_shots != expected_retry_missing:
+        raise ShotAssessmentContractError(
+            "quality=retry requires requestedShot and later shots in missingShots"
+        )
+    if (
+        assessment.shot_type.value != requested.value
+        and ShotIssue.WRONG_SHOT not in assessment.issues
+    ):
+        raise ShotAssessmentContractError(
+            "a mismatched shotType requires the WRONG_SHOT issue"
+        )
+    return assessment
 
 
 @runtime_checkable
@@ -271,7 +343,9 @@ class ResponsesShotAssessor:
         if not isinstance(input, ShotAssessorInput):
             raise ShotAssessmentContractError("input must be a ShotAssessorInput")
         response = await self._client.create(**self.request_for(input, self._model))
-        return validate_shot_assessment(_response_payload(response))
+        return validate_shot_assessment_for_requested_shot(
+            _response_payload(response), input.requested_shot
+        )
 
 
 def _response_payload(response: object) -> object:
@@ -316,5 +390,6 @@ __all__ = [
     "validate_next_action",
     "validate_requested_shot",
     "validate_shot_assessment",
+    "validate_shot_assessment_for_requested_shot",
     "validate_shot_quality",
 ]

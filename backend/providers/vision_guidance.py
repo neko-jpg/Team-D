@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
+from types import MappingProxyType
 from typing import Mapping, Protocol, runtime_checkable
 
 
@@ -43,6 +44,49 @@ class GuidanceShot(str, Enum):
 
 GUIDANCE_CODES = tuple(code.value for code in GuidanceCode)
 GUIDANCE_SHOTS = tuple(shot.value for shot in GuidanceShot)
+
+_COMMON_GARMENT_CODES = frozenset(
+    {
+        GuidanceCode.MOVE_CLOSER,
+        GuidanceCode.MOVE_FARTHER,
+        GuidanceCode.CENTER_GARMENT,
+        GuidanceCode.SHOW_FULL_GARMENT,
+        GuidanceCode.HOLD_STEADY,
+        GuidanceCode.READY,
+        GuidanceCode.AGENT_UNAVAILABLE,
+    }
+)
+
+# A strict schema can constrain the enum, but only this application-owned
+# mapping can prevent a structurally valid measurement hint from being shown
+# during front capture (or vice versa).
+GUIDANCE_CODES_BY_SHOT: Mapping[GuidanceShot, frozenset[GuidanceCode]] = MappingProxyType(
+    {
+        GuidanceShot.FRONT: _COMMON_GARMENT_CODES
+        | {GuidanceCode.WRONG_SIDE, GuidanceCode.FLATTEN_GARMENT},
+        GuidanceShot.BACK: _COMMON_GARMENT_CODES
+        | {GuidanceCode.WRONG_SIDE, GuidanceCode.FLATTEN_GARMENT},
+        GuidanceShot.TAG: frozenset(
+            {
+                GuidanceCode.MOVE_CLOSER,
+                GuidanceCode.MOVE_FARTHER,
+                GuidanceCode.CENTER_GARMENT,
+                GuidanceCode.MOVE_TO_TAG,
+                GuidanceCode.HOLD_STEADY,
+                GuidanceCode.READY,
+                GuidanceCode.AGENT_UNAVAILABLE,
+            }
+        ),
+        GuidanceShot.MEASUREMENT: _COMMON_GARMENT_CODES
+        | {
+            GuidanceCode.WRONG_SIDE,
+            GuidanceCode.PLACE_MARKER,
+            GuidanceCode.MARKER_NOT_VISIBLE,
+            GuidanceCode.FLATTEN_GARMENT,
+            GuidanceCode.CAMERA_OVERHEAD,
+        },
+    }
+)
 
 
 def _enum_value(enum_type: type[Enum], value: object, field: str) -> Enum:
@@ -186,6 +230,18 @@ def validate_vision_decision(value: object) -> VisionDecision:
     raise GuidanceContractError("vision decision must be VisionDecision or an object")
 
 
+def validate_vision_decision_for_shot(value: object, shot: object) -> VisionDecision:
+    """Validate both the finite result shape and its current-step meaning."""
+
+    shot_value = validate_guidance_shot(shot)
+    decision = validate_vision_decision(value)
+    if decision.code not in GUIDANCE_CODES_BY_SHOT[shot_value]:
+        raise GuidanceContractError(
+            f"code {decision.code.value} is not valid for requestedShot={shot_value.value}"
+        )
+    return decision
+
+
 @runtime_checkable
 class VisionGuidanceProvider(Protocol):
     async def analyze(self, input: GuidanceInput) -> VisionDecision | Mapping[str, object]:
@@ -195,6 +251,7 @@ class VisionGuidanceProvider(Protocol):
 __all__ = [
     "EncodedImage",
     "GUIDANCE_CODES",
+    "GUIDANCE_CODES_BY_SHOT",
     "GUIDANCE_SHOTS",
     "GuidanceCode",
     "GuidanceContractError",
@@ -206,4 +263,5 @@ __all__ = [
     "validate_guidance_input",
     "validate_guidance_shot",
     "validate_vision_decision",
+    "validate_vision_decision_for_shot",
 ]

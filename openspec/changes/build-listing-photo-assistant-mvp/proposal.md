@@ -5,7 +5,7 @@
 ## What Changes
 
 - モバイルカメラ上へ正面・背面・タグごとの固定2Dガイドと進捗を表示する。
-- カメラ映像をLiveKit RoomへWebRTC publishし、stateful Agentがvideo対応AIで構図・距離・表裏・タグ移動を判定して、有限な撮影助言をfrontendへpushする。
+- カメラ映像をLiveKit RoomへWebRTC publishし、stateful AgentがOpenAI Realtimeとの単一の常時WebSocket接続へ最新の縮小frameだけを連続投入して、構図・距離・表裏・タグ移動の有限な撮影助言をfrontendへpushする。
 - 端末内では明るさ、ブレ、映像の安定性を補助判定し、Agent切断時も固定ガイドと手動撮影を維持する。
 - 手動撮影後は高解像度画像をstrictな構造化AI判定へ送り、撮り直し、次撮影、完了を確定する。
 - `1/4 正面 → 2/4 背面 → 3/4 タグ → 4/4 採寸`の固定順序で4枚を撮り、受け入れ済み画像を保持して撮影ループを続ける。
@@ -31,7 +31,7 @@
 ## Impact
 
 - React／TypeScript／Vite: カメラ、固定ガイド、LiveKit Room接続とvideo publish、Agentイベント購読、端末内品質解析、撮影状態、採寸点の修正・承認、比較・承認UI。
-- Python backend／LiveKit Agent: 短命token発行、camera track購読、最新フレームの意味判定、有限な`GuidanceEvent`のdata packet／RPC push、撮影後判定、採寸4端点提案、背景生成、rembg接続。
+- Python backend／LiveKit Agent: 短命token発行、camera track購読、OpenAI Realtime sessionのprewarmと再利用、最新フレーム優先の意味判定、有限な`GuidanceEvent`のdata packet／RPC push、撮影後判定、採寸4端点提案、背景生成、rembg接続。
 - OpenCV.js: 50mm専用マーカー検出、射影補正、縮尺計算、画像上の測定点からcmへの換算。
 - Python sidecar: rembg v2.0.81と`birefnet-general-lite`。
 - 外部OSSの採用境界、固定commit、ライセンス対応はルートの`architecture.md`を参照する。

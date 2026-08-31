@@ -272,11 +272,11 @@ interface VisionGuidanceProvider {
 }
 ```
 
-AIへ自由文のUIメッセージや画面遷移を決めさせない。providerは有限な`code`と`confidence`だけを返し、runtime validation後に`GuidanceStateMachine`が固定文言、順序、期限を付けて`GuidanceEvent`へ変換する。この境界によりOpenAI Realtime、Responses API、Gemini Live、ローカルVLMをUI変更なしで交換できる。
+AIへ自由文のUIメッセージや画面遷移を決めさせない。providerは有限な`code`と`confidence`だけを返し、runtime validation後に`GuidanceStateMachine`が固定文言、順序、期限を付けて`GuidanceEvent`へ変換する。本番live経路は撮影セッションごとにprewarmしたOpenAI Realtime WebSocketを1本だけ維持し、各frameを`conversation: none`の独立responseとして送る。強制function schemaのargumentsまたは有限JSON textだけを受理し、過去frameやresponseをmodel contextへ蓄積しない。この境界によりRealtime modelをUI変更なしで交換できる。
 
 端末内loopは、`object-fit`を考慮した固定ROIを最大辺320pxへ縮小する。初期閾値はaverage luma 45〜215、Laplacian variance 24以上、normalized frame delta 0.020未満が600ms継続とする。通常4Hz、同時解析1件とし、状態変化から表示までp95 500ms以内を目標にする。
 
-Agent側はframe到着イベントで駆動し、1〜2fpsを上限に意味判定へ渡す。これはブラウザからのHTTP pollingではなく、WebRTC trackをAgentが継続購読し、負荷に応じて最新frameをcoalesceするbackpressureである。処理中の中間frameは保存せず、完了時点の最新frameから次を開始する。
+Agent側はframe到着イベントで駆動し、最大4Hzで意味判定候補を選ぶ。これはブラウザからのHTTP pollingではなく、WebRTC trackをAgentが継続購読し、同時response 1件・待機frame 1件で最新frameをcoalesceするbackpressureである。処理中の中間frameは保存せず、完了時点の最新frameから次を開始する。Realtime入力は最大辺256px、JPEG quality 55、`detail: low`をproduction defaultとする。
 
 ```ts
 type GuidanceEvent = {
@@ -294,7 +294,7 @@ type GuidanceEvent = {
 - 短命な助言はlossy packetで送り、同一`shot`／`code`は変化時だけ送る。
 - shot変更、撮影受理、現在状態の再同期はreliable packetまたはRPCで扱う。
 - frontendは`sessionId`不一致、現在shot不一致、既読以下の`sequence`、`expiresAt`超過を破棄する。
-- AI意味判定の表示目標は観測からp95 2秒以内。目標を外してもqueueを増やさず最新状態を優先する。
+- AI意味判定はcamera frame受付前にRealtime sessionをprewarmし、実`OPENAI_API_KEY`で成功20件以上、provider error 0件、`observedAt`からbackend publishまでp95 1秒未満を必須ゲートとする。provider response deadlineは900ms、transport deadlineは950msとし、超過responseだけをcancelしてwarm socketを維持する。cold-startは別計測する。
 - Agent不在時も固定ガイド、端末内品質判定、手動撮影は残す。
 - ライブ結果は助言のみ。front／back／tagの受理は撮影後の高解像度`ShotAssessment`、measurementの受理はマーカー・全体写り・品質検証だけが決める。
 

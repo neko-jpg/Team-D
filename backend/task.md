@@ -69,7 +69,7 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 5.6 【健太】fixture transportで正常、provider timeout、古いevent、shot変更、切断／再接続、再同期を順に発生させ、sequence、expiry、現在shot、provider呼び出しが不正に巻き戻らないバックエンド回帰テストを1コマンドで実行できるようにする。（元タスク: 3.16）
 
-- [x] 5.7 【健太】Agent意味判定の同時実行数1、待機queue最大1、観測から助言event生成までp95 2秒以内、未処理例外0件を計測する。目標外でもqueueを増やさず、最新frameだけを処理することを確認する。（元タスク: 3.17）
+- [x] 5.7 【健太】Agent意味判定の同時実行数1、待機queue最大1、prewarm済み実OpenAI Realtimeの成功20件以上・provider error 0件・観測から助言event生成までp95 1秒未満、未処理例外0件を計測する。目標外でもqueueを増やさず、最新frameだけを処理することを確認する。（元タスク: 3.17、9.10）
 
 - [x] 5.8 【ともちゃん】fixtureモードでAgent guidance経路と`analyze-shot`、`suggest-measurement-points`、`remove-background`、背景生成providerを順に通すバックエンドE2Eを2回連続で実行し、同じevent、response、error契約を得る。（元タスク: 8.1）
 
@@ -78,6 +78,12 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 - [x] 5.10 【ともちゃん】Agent停止、撮影後AI timeout、端点提案失敗、rembg timeout／無効mask、背景生成失敗をfixtureで発生させ、成功responseへ自動変換せず、有限なerrorと再試行可能性を返すバックエンド障害マトリクステストを追加する。（元タスク: 8.3）
 
 - [x] 5.11 【健太】Python backend／Agentのunit、contract、API、integration、backend E2EテストをcleanなPython環境で実行し、失敗0件、未処理例外0件を確認する。frontend build、browser console、Safari実機確認は含めない。（元タスク: 8.7）
+
+## 6. OpenAI Realtime 1秒経路
+
+- [x] 6.1 【ともちゃん】frameごとのResponses APIを廃止し、撮影セッション単位のOpenAI Realtime WebSocket、prewarm、`conversation: none`、最大辺256px JPEG、有限function schemaへ変更する。
+- [x] 6.2 【ともちゃん】timeout時はresponseだけをcancelしてwarm socketを維持し、切断時だけ再接続する。session closeでprovider clientを1回だけ解放する契約テストを通す。
+- [x] 6.3 【健太】`.env.local`の実`OPENAI_API_KEY`で20件を計測し、接続1回、provider error 0件、provider p95 528.842ms、`observedAt→backend publish` p95 529.307ms、backend publish p95 0.297msを確認する。
 
 ## 完了条件
 

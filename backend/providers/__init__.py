@@ -42,12 +42,14 @@ from .runtime import (
     LiveAnalyzer,
     LiveVisionGuidanceProvider,
     ProviderInference,
+    ProviderInferenceAdapter,
     ProviderUnavailableError,
     create_provider_inference,
     create_vision_guidance_provider,
     guidance_input_from_frame,
 )
 from .vision_guidance import (
+    GUIDANCE_CODES_BY_SHOT,
     EncodedImage,
     GuidanceCode,
     GuidanceContractError,
@@ -55,10 +57,17 @@ from .vision_guidance import (
     GuidanceShot,
     VisionDecision,
     VisionGuidanceProvider,
+    validate_vision_decision_for_shot,
 )
 from .vision_guidance_responses import (
     ResponsesVisionGuidanceAnalyzer,
     VISION_GUIDANCE_JSON_SCHEMA,
+)
+from .vision_guidance_realtime import (
+    DEFAULT_REALTIME_GUIDANCE_MODEL,
+    OpenAIRealtimeVisionGuidanceAnalyzer,
+    RealtimeGuidanceError,
+    RealtimeGuidanceTimeoutError,
 )
 from .shot_assessor import (
     AssessmentImage,
@@ -68,6 +77,7 @@ from .shot_assessor import (
     ShotAssessor,
     ShotAssessorInput,
     validate_shot_assessment,
+    validate_shot_assessment_for_requested_shot,
 )
 from .shot_assessor_factory import FixtureShotAssessor, create_shot_assessor
 
@@ -92,6 +102,7 @@ __all__ = [
     "GarmentMaskUnavailableError",
     "GarmentMasker",
     "GarmentMaskerProvider",
+    "GUIDANCE_CODES_BY_SHOT",
     "GuidanceCode",
     "GuidanceContractError",
     "GuidanceInput",
@@ -109,10 +120,15 @@ __all__ = [
     "MeasurementLineProvider",
     "NormalizedPoint",
     "ProviderInference",
+    "ProviderInferenceAdapter",
     "ProviderUnavailableError",
     "ResponsesMeasurementLineProvider",
     "ResponsesShotAssessor",
     "ResponsesVisionGuidanceAnalyzer",
+    "DEFAULT_REALTIME_GUIDANCE_MODEL",
+    "OpenAIRealtimeVisionGuidanceAnalyzer",
+    "RealtimeGuidanceError",
+    "RealtimeGuidanceTimeoutError",
     "ShotAssessment",
     "ShotAssessmentContractError",
     "ShotAssessor",
@@ -128,4 +144,6 @@ __all__ = [
     "HttpxGarmentMaskHttpClient",
     "validate_measurement_endpoints",
     "validate_shot_assessment",
+    "validate_shot_assessment_for_requested_shot",
+    "validate_vision_decision_for_shot",
 ]
