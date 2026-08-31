@@ -22,7 +22,7 @@
     "build:api": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist-server/index.js --sourcemap",
     "build": "npm run typecheck && npm run build:web",
     "test": "vitest run --config app/vitest.config.ts && vitest run --environment node server/app.test.ts",
-    "test:backend": ".venv/bin/python -m pytest -q tests/test_backend_entrypoints.py tests/test_livekit_token.py tests/test_live_agent.py tests/test_guidance_contract.py",
+    "test:backend": ".venv/bin/python -m pytest -q tests/test_backend_entrypoints.py tests/test_livekit_token.py tests/test_live_agent.py tests/test_guidance_contract.py tests/test_shot_assessor_contract.py tests/test_analyze_shot_api.py tests/test_shot_assessor_mode_contract.py",
     "verify:backend": "bash scripts/verify-backend.sh",
     "test:watch": "vitest --config app/vitest.config.ts"
   },

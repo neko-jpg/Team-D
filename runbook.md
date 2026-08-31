@@ -128,3 +128,65 @@ browserタブを閉じ、terminal Aで`Ctrl-C`、terminal Bで`Ctrl-C`を実行�
 ```bash
 lk room delete "$LIVEKIT_ROOM"
 ```
+
+## 撮影後 ShotAssessor のデモ切替（OpenSpec 4.5）
+
+`PROVIDER_MODE` はプロセス起動時に選ぶ明示的な provider 選択である。`live`
+での timeout、外部 provider error、または runtime schema error は HTTP の失敗として
+利用者へ返し、同じ request の中で fixture の成功 response に置き換えてはならない。
+撮影済み slot と現在 step はその失敗で変更しない。
+
+### live を継続する条件
+
+デモ開始前に `live` で front、back、tag の各 1 request を試す。各 request は
+20 秒以内に runtime schema を満たす response を返し、provider error がなく、結果が
+requested shot と整合する場合に live を継続する。失敗した request は同じ画像で 1 回
+だけ再試行してよい。再試行でも次のいずれかが起きたら、ライブ検証を止めて fixture
+へ切り替える。
+
+- 20 秒 timeout、接続／認証／rate-limit を含む provider error
+- schema validation error または requested shot と矛盾する response
+- front、back、tag のいずれかで 2 回連続して有効な response を得られない
+
+この判断は「live が失敗したので成功扱いにする」ものではない。画面上の失敗を確認し、
+fixture を選ぶために operator が process を切り替える。
+
+live preflightの前に、gitignoredの`.env.local`へserver-onlyの資格情報と固定モデルを
+設定する。`OPENAI_API_KEY`を`VITE_`で始まる変数へ複製してはならない。
+
+```dotenv
+OPENAI_API_KEY=...
+SHOT_ASSESSOR_MODEL=gpt-4.1-mini-2025-04-14
+```
+
+### fixture へ明示的に切り替える
+
+1. live API／Agent を起動している terminal で `Ctrl-C` を押し、`PROVIDER_MODE=live`
+   の process が残っていないことを確認する。
+2. 新しい terminal でリポジトリ root に移動し、fixture process を起動する。
+
+   ```bash
+   npm run dev:fixture
+   ```
+
+   期待結果は startup log に `provider_mode=fixture` が出て、
+   `curl --fail http://127.0.0.1:3001/api/health` が `{"status":"ok"}` を返すこと。
+3. ブラウザを更新して fixture の撮影フローを新しい request として開始する。live で
+   失敗した request を成功として再利用せず、fixture response が返ることを確認する。
+4. fixture で front、back、tag を各 1 回実行し、決定的な response でデモを継続する。
+
+### live へ戻す条件
+
+外部 provider の資格情報・接続・schema を修正した後だけ、fixture process を停止する。
+新しいterminalで`.env.local`を明示的に読み込んでからliveを起動する。
+
+```bash
+set -a
+source .env.local
+set +a
+npm run dev:live
+```
+
+上の preflight（3 shot、各 20 秒以内）にすべて通るまで live をデモ経路へ戻さない。
+live が再び失敗した場合も、自動 fallback はせず、同じ停止条件で operator が fixtureを
+選択する。
