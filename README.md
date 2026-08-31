@@ -37,6 +37,7 @@ npm run build
 |---|---|
 | [requirements.md](./requirements.md) | 企画背景、対象ユーザー、解決策、中心体験、実装範囲をまとめた要件定義 |
 | [architecture.md](./architecture.md) | モバイルWeb、画像AI、背景分離、状態管理などの技術構成 |
+| [runbook.md](./runbook.md) | LiveKit Cloudの最小接続とデモ運用手順 |
 | [garment-measurement-oss.md](./garment-measurement-oss.md) | 衣類の半自動採寸に利用できるOSSと実装方法の調査 |
 | [oss-links.md](./oss-links.md) | 採用候補および参考OSSの一覧 |
 | [ekyc-ar-ui-flow-final.png](./ekyc-ar-ui-flow-final.png) | AR準備から背景設定までのUIフロー |

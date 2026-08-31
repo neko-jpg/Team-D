@@ -10,6 +10,7 @@
     "dev": "concurrently -k -n api,web -c yellow,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "tsx watch server/index.ts",
     "dev:web": "vite --config app/vite.config.ts --host 0.0.0.0",
+    "dev:livekit-browser": "vite --config app/vite.config.ts --host 127.0.0.1 --open /livekit-smoke.html",
     "start:api": "node dist-server/index.js",
     "typecheck": "tsc -p app/tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "build:web": "vite build --config app/vite.config.ts",
@@ -19,6 +20,7 @@
     "test:watch": "vitest --config app/vitest.config.ts"
   },
   "dependencies": {
+    "livekit-client": "2.22.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "zod": "^3.25.76"
