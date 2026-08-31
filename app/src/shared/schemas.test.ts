@@ -6,6 +6,7 @@ import {
   CaptureSlotStateSchema,
   LiveCaptureAssessmentSchema,
   ProviderErrorSchema,
+  SessionSlotSchema,
   ShotAssessmentSchema,
   type CaptureSlotState,
   type LiveCaptureAssessment,
@@ -201,5 +202,101 @@ describe("ProviderErrorSchema", () => {
         debug: { secret: "must not cross the boundary" },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("session slot compatibility", () => {
+  it("accepts all four required session photos", () => {
+    expect(SessionSlotSchema.parse("front")).toBe("front");
+    expect(SessionSlotSchema.parse("back")).toBe("back");
+    expect(SessionSlotSchema.parse("tag")).toBe("tag");
+    expect(SessionSlotSchema.parse("measurement")).toBe("measurement");
+  });
+
+  it("keeps the assessed shot slots at front, back, and tag", () => {
+    expect(CaptureSlotSchema.safeParse("measurement").success).toBe(false);
+    expect(SessionSlotSchema.safeParse("edit").success).toBe(false);
+  });
+});
+
+describe("ShotAssessmentSchema measurement isolation", () => {
+  it("rejects measurement as an assessed shot type", () => {
+    expect(
+      ShotAssessmentSchema.safeParse({
+        ...validShotAssessment,
+        shotType: "measurement",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects measurement inside missingShots", () => {
+    expect(
+      ShotAssessmentSchema.safeParse({
+        ...validShotAssessment,
+        missingShots: ["measurement"],
+      }).success,
+    ).toBe(false);
+
+    expect(
+      ShotAssessmentSchema.safeParse({
+        ...validShotAssessment,
+        missingShots: ["back", "tag", "measurement"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects measurement geometry smuggled in as extra fields", () => {
+    expect(
+      ShotAssessmentSchema.safeParse({
+        ...validShotAssessment,
+        measurement: { lengthCm: 68, widthCm: 52 },
+      }).success,
+    ).toBe(false);
+
+    expect(
+      ShotAssessmentSchema.safeParse({ ...validShotAssessment, lengthCm: 68 })
+        .success,
+    ).toBe(false);
+
+    expect(
+      ShotAssessmentSchema.safeParse({
+        ...validShotAssessment,
+        pxPerCm: 12.5,
+      }).success,
+    ).toBe(false);
+
+    expect(
+      ShotAssessmentSchema.safeParse({
+        ...validShotAssessment,
+        endpoints: {
+          lengthStart: { x: 0.5, y: 0.1 },
+          lengthEnd: { x: 0.5, y: 0.9 },
+          widthStart: { x: 0.2, y: 0.4 },
+          widthEnd: { x: 0.8, y: 0.4 },
+        },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("provider boundary coverage", () => {
+  it("accepts the live guidance and measurement providers", () => {
+    expect(
+      ProviderErrorSchema.parse({
+        provider: "vision-guidance",
+        code: "UNAVAILABLE",
+        message: "Agent is not connected",
+        retryable: true,
+      }).provider,
+    ).toBe("vision-guidance");
+
+    expect(
+      ProviderErrorSchema.parse({
+        provider: "measurement-line",
+        code: "TIMEOUT",
+        message: "Endpoint suggestion timed out",
+        retryable: true,
+      }).provider,
+    ).toBe("measurement-line");
   });
 });
