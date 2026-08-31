@@ -60,11 +60,11 @@
 
 ## 4. 撮影後AI判定
 
-- [ ] 4.1 【友ちゃんさん】Wardrobeのstrict schemaパターンを参考に`ShotAssessor`を実装し、`shotType`、`quality`、有限な`issues`、`missingShots`、`nextAction`の全fieldをruntime検証して、front／back／tag／unknown以外、measurement、未知enum、field欠落を拒否する契約テストを通す
+- [x] 4.1 【友ちゃんさん】Wardrobeのstrict schemaパターンを参考に`ShotAssessor`を実装し、`shotType`、`quality`、有限な`issues`、`missingShots`、`nextAction`の全fieldをruntime検証して、front／back／tag／unknown以外、measurement、未知enum、field欠落を拒否する契約テストを通す
 - [ ] 4.2 【徹平さん】正面原本を変更せず解析コピーだけをEXIF回転・sRGB正規化する処理を実装し、向きと色空間が異なるfront／back／tag fixtureで、原本hash不変と解析画像の期待寸法・向きを確認する
-- [ ] 4.3 【友ちゃんさん】FastAPIの`POST /api/analyze-shot`へ`requestedShot: front|back|tag`、multipart、20秒timeout、MIME／size制限、runtime schema検証を実装し、measurement指定、schema不正、timeout時に進捗を変更しないAPI／統合テストを通す
+- [x] 4.3 【友ちゃんさん】FastAPIの`POST /api/analyze-shot`へ`requestedShot: front|back|tag`、multipart、20秒timeout、MIME／size制限、runtime schema検証を実装し、measurement指定、schema不正、timeout時に進捗を変更しないAPI／統合テストを通す
 - [ ] 4.4 【徹平さん】ライブ`READY`でも撮影後AIが`retry`なら、有限issueから最優先の理由と具体的な撮り直し方を1件表示して同じshotへ戻し、対象slotだけを未受理にして他slotを保持し、撮り直し後に届いた古いrequest結果を無視するUI／Reducerテストを通す
-- [ ] 4.5 【友ちゃんさん】live `ShotAssessor`がデモ時間内に安定しない場合は`PROVIDER_MODE=fixture`へ明示的に切り替える手順と継続／停止条件をrunbookへ記録し、live errorをfixture成功responseへ自動変換しない契約テストを通す
+- [x] 4.5 【友ちゃんさん】live `ShotAssessor`がデモ時間内に安定しない場合は`PROVIDER_MODE=fixture`へ明示的に切り替える手順と継続／停止条件をrunbookへ記録し、live errorをfixture成功responseへ自動変換しない契約テストを通す
 
 ## 5. 50mmマーカーによる半自動採寸
 

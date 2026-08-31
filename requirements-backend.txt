@@ -1,6 +1,8 @@
 # Python 3.11+ backend runtime. livekit-agents 1.7.1 requires livekit 1.1.15
 # exactly, so keep this set together until task 3.2 owns the full lockfile.
 fastapi==0.116.1
+openai==2.54.0
+python-multipart==0.0.20
 livekit==1.1.15
 livekit-agents==1.7.1
 livekit-api==1.2.1
