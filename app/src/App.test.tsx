@@ -174,10 +174,10 @@ describe("capture upload vertical slice", () => {
 
     await upload(container, "front.png");
     expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("back");
-    selectValue(container, "fixture-shot", "back");
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="fixture-shot"]')?.value).toBe("back");
     await upload(container, "back.png");
     expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("tag");
-    selectValue(container, "fixture-shot", "tag");
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="fixture-shot"]')?.value).toBe("tag");
     await upload(container, "tag.png");
 
     expect(container.querySelector('[data-testid="edit-entry"]')).not.toBeNull();
@@ -232,7 +232,7 @@ describe("capture upload vertical slice", () => {
 });
 
 describe("camera capture vertical slice", () => {
-  it("sends a raw manual capture to the assessor and advances the fixed guide", async () => {
+  it("keeps the fixture and fixed guide in sync through three camera captures", async () => {
     const rawCameraBlob = new Blob(["distinctive-raw-camera-frame"], {
       type: "image/jpeg",
     });
@@ -280,5 +280,38 @@ describe("camera capture vertical slice", () => {
     expect(container.querySelector<HTMLImageElement>('img[alt="正面写真"]')?.src).toContain(
       "blob:test-1",
     );
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="fixture-shot"]')?.value).toBe(
+      "back",
+    );
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="背面を撮影"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("tag");
+    expect(container.querySelector('[data-testid="camera-guide"]')?.className).toContain(
+      "camera-guide--tag",
+    );
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="fixture-shot"]')?.value).toBe(
+      "tag",
+    );
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="タグを撮影"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captureFrame).toHaveBeenCalledTimes(3);
+    expect(container.querySelector('[data-testid="edit-entry"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="accepted-count"]')?.textContent).toContain("3/3");
   });
 });
