@@ -8,6 +8,8 @@ missing optional image runtime does not make importing :mod:`backend` fail.
 
 from __future__ import annotations
 
+import asyncio
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from io import BytesIO
@@ -17,6 +19,8 @@ from typing import Any, Protocol, runtime_checkable
 REMBG_REMOVE_URL = "http://127.0.0.1:7000/api/remove"
 REMBG_MODEL = "birefnet-general-lite"
 REMBG_TIMEOUT_SECONDS = 35.0
+MAX_GARMENT_IMAGE_PIXELS = 50_000_000
+MAX_GARMENT_MASK_BYTES = 10 * 1024 * 1024
 
 
 class GarmentMaskContractError(ValueError):
@@ -89,6 +93,13 @@ class GarmentMaskHttpClient(Protocol):
         """POST a multipart body and return its response."""
 
 
+@dataclass(frozen=True, slots=True)
+class _BufferedGarmentMaskHttpResponse:
+    status_code: int
+    headers: Mapping[str, str]
+    content: bytes
+
+
 @runtime_checkable
 class GarmentMaskerProvider(Protocol):
     async def mask(self, front: GarmentMaskInput) -> GarmentMask:
@@ -108,7 +119,11 @@ class GarmentMasker:
         if not isinstance(front, GarmentMaskInput):
             raise GarmentMaskContractError("front must be a GarmentMaskInput")
 
-        original_width, original_height = _decode_image_size(front.data, "front image")
+        original_width, original_height = await asyncio.to_thread(
+            _decode_image_size,
+            front.data,
+            "front image",
+        )
         files: dict[str, object] = {"file": ("front", front.data, front.mime_type)}
         data = {"model": REMBG_MODEL, "om": "true"}
         try:
@@ -118,6 +133,12 @@ class GarmentMasker:
                 data=data,
                 timeout=REMBG_TIMEOUT_SECONDS,
             )
+        except TimeoutError:
+            # Keep timeout identity so the HTTP boundary can return its finite
+            # TIMEOUT contract instead of collapsing it into UNAVAILABLE.
+            raise
+        except GarmentMaskContractError:
+            raise
         except GarmentMaskProviderError:
             raise
         except Exception as exc:
@@ -135,13 +156,19 @@ class GarmentMasker:
         content = getattr(response, "content", None)
         if not isinstance(content, bytes) or not content:
             raise GarmentMaskContractError("rembg response body must be non-empty PNG bytes")
+        if len(content) > MAX_GARMENT_MASK_BYTES:
+            raise GarmentMaskContractError("rembg response exceeds the mask size limit")
 
-        mask_width, mask_height, extrema = _decode_png_mask(content)
+        mask_width, mask_height, extrema = await asyncio.to_thread(
+            _decode_png_mask,
+            content,
+            (original_width, original_height),
+        )
         if (mask_width, mask_height) != (original_width, original_height):
             raise GarmentMaskContractError("rembg mask dimensions must match the front image")
-        if extrema[0] == 0 and extrema[1] == 0:
+        if extrema[1] == 0:
             raise GarmentMaskContractError("rembg returned an empty mask")
-        if extrema[0] == 255 and extrema[1] == 255:
+        if extrema[0] > 0:
             raise GarmentMaskContractError("rembg returned a full-image mask")
         return GarmentMask(data=content, width=mask_width, height=mask_height)
 
@@ -166,8 +193,53 @@ class HttpxGarmentMaskHttpClient:
             import httpx
         except ImportError as exc:  # pragma: no cover - depends on deployment extras
             raise GarmentMaskUnavailableError("httpx is required to contact rembg") from exc
-        async with httpx.AsyncClient() as client:
-            return await client.post(url, files=files, data=data, timeout=timeout)
+        try:
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "POST",
+                    url,
+                    files=files,
+                    data=data,
+                    timeout=timeout,
+                ) as response:
+                    if not 200 <= response.status_code < 300:
+                        return _BufferedGarmentMaskHttpResponse(
+                            status_code=response.status_code,
+                            headers=response.headers,
+                            content=b"",
+                        )
+                    if _content_type(response.headers) != "image/png":
+                        return _BufferedGarmentMaskHttpResponse(
+                            status_code=response.status_code,
+                            headers=response.headers,
+                            content=b"",
+                        )
+
+                    content_length = response.headers.get("content-length")
+                    if content_length is not None:
+                        try:
+                            declared_length = int(content_length)
+                        except ValueError:
+                            declared_length = 0
+                        if declared_length > MAX_GARMENT_MASK_BYTES:
+                            raise GarmentMaskContractError(
+                                "rembg response exceeds the mask size limit"
+                            )
+
+                    content = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        if len(content) + len(chunk) > MAX_GARMENT_MASK_BYTES:
+                            raise GarmentMaskContractError(
+                                "rembg response exceeds the mask size limit"
+                            )
+                        content.extend(chunk)
+                    return _BufferedGarmentMaskHttpResponse(
+                        status_code=response.status_code,
+                        headers=response.headers,
+                        content=bytes(content),
+                    )
+        except httpx.TimeoutException as exc:
+            raise TimeoutError("rembg request timed out") from exc
 
 
 def _pillow_image() -> Any:
@@ -184,46 +256,83 @@ def _pillow_image() -> Any:
 
 def _decode_image_size(data: bytes, label: str) -> tuple[int, int]:
     image_module = _pillow_image()
-    try:
-        # ``verify`` catches truncated/corrupt payloads. Reopening afterwards
-        # obtains dimensions from a decoder that has passed that integrity check.
-        with image_module.open(BytesIO(data)) as image:
-            image.verify()
-        with image_module.open(BytesIO(data)) as image:
-            width, height = image.size
-            image.load()
-    except GarmentMaskUnavailableError:
-        raise
-    except Exception as exc:
-        raise GarmentMaskContractError(f"{label} must be decodable image bytes") from exc
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", image_module.DecompressionBombWarning)
+        try:
+            # ``verify`` catches truncated/corrupt payloads. Reopening afterwards
+            # obtains dimensions from a decoder that has passed that integrity check.
+            with image_module.open(BytesIO(data)) as image:
+                width, height = image.size
+                if width * height > MAX_GARMENT_IMAGE_PIXELS:
+                    raise GarmentMaskContractError(
+                        f"{label} dimensions exceed the safe decode limit"
+                    )
+                image.verify()
+            with image_module.open(BytesIO(data)) as image:
+                width, height = image.size
+                image.load()
+        except GarmentMaskUnavailableError:
+            raise
+        except GarmentMaskContractError:
+            raise
+        except (
+            image_module.DecompressionBombWarning,
+            image_module.DecompressionBombError,
+        ) as exc:
+            raise GarmentMaskContractError(
+                f"{label} dimensions exceed the safe decode limit"
+            ) from exc
+        except Exception as exc:
+            raise GarmentMaskContractError(f"{label} must be decodable image bytes") from exc
     if width <= 0 or height <= 0:
         raise GarmentMaskContractError(f"{label} must have positive dimensions")
     return width, height
 
 
-def _decode_png_mask(data: bytes) -> tuple[int, int, tuple[int, int]]:
+def _decode_png_mask(
+    data: bytes,
+    expected_size: tuple[int, int] | None = None,
+) -> tuple[int, int, tuple[int, int]]:
     image_module = _pillow_image()
-    try:
-        with image_module.open(BytesIO(data)) as image:
-            if image.format != "PNG":
-                raise GarmentMaskContractError("rembg response body must be a PNG image")
-            if image.mode not in {"1", "L"}:
-                raise GarmentMaskContractError("rembg response must be a mask-only grayscale PNG")
-            image.verify()
-        with image_module.open(BytesIO(data)) as image:
-            if image.format != "PNG":
-                raise GarmentMaskContractError("rembg response body must be a PNG image")
-            if image.mode not in {"1", "L"}:
-                raise GarmentMaskContractError("rembg response must be a mask-only grayscale PNG")
-            image.load()
-            width, height = image.size
-            extrema = image.convert("L").getextrema()
-    except GarmentMaskContractError:
-        raise
-    except GarmentMaskUnavailableError:
-        raise
-    except Exception as exc:
-        raise GarmentMaskContractError("rembg response body must be a decodable PNG image") from exc
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", image_module.DecompressionBombWarning)
+        try:
+            with image_module.open(BytesIO(data)) as image:
+                if image.format != "PNG":
+                    raise GarmentMaskContractError("rembg response body must be a PNG image")
+                if image.mode not in {"1", "L"}:
+                    raise GarmentMaskContractError(
+                        "rembg response must be a mask-only grayscale PNG"
+                    )
+                width, height = image.size
+                if expected_size is not None and (width, height) != expected_size:
+                    raise GarmentMaskContractError(
+                        "rembg mask dimensions must match the front image"
+                    )
+                if width * height > MAX_GARMENT_IMAGE_PIXELS:
+                    raise GarmentMaskContractError(
+                        "rembg response dimensions exceed the safe decode limit"
+                    )
+                image.verify()
+            with image_module.open(BytesIO(data)) as image:
+                image.load()
+                width, height = image.size
+                extrema = image.getextrema()
+        except GarmentMaskContractError:
+            raise
+        except GarmentMaskUnavailableError:
+            raise
+        except (
+            image_module.DecompressionBombWarning,
+            image_module.DecompressionBombError,
+        ) as exc:
+            raise GarmentMaskContractError(
+                "rembg response dimensions exceed the safe decode limit"
+            ) from exc
+        except Exception as exc:
+            raise GarmentMaskContractError(
+                "rembg response body must be a decodable PNG image"
+            ) from exc
     if width <= 0 or height <= 0 or not isinstance(extrema, tuple) or len(extrema) != 2:
         raise GarmentMaskContractError("rembg response mask is invalid")
     return width, height, extrema
@@ -252,6 +361,8 @@ __all__ = [
     "GarmentMaskerProvider",
     "GarmentMaskInput",
     "HttpxGarmentMaskHttpClient",
+    "MAX_GARMENT_IMAGE_PIXELS",
+    "MAX_GARMENT_MASK_BYTES",
     "REMBG_MODEL",
     "REMBG_REMOVE_URL",
     "REMBG_TIMEOUT_SECONDS",
