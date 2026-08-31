@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from . import live_agent as _live_agent
+from .guidance_transport import GuidanceTransportAdapter
 from .live_agent import *  # noqa: F401,F403
 from .providers.runtime import (
     LiveAnalyzer,
@@ -29,6 +30,7 @@ LOGGER = logging.getLogger(__name__)
 
 AgentRunner = Callable[[Any], Any]
 ServerFactory = Callable[..., Any]
+TransportFactory = Callable[[Any, Callable[[], _live_agent.Shot]], GuidanceTransportAdapter]
 
 
 def build_runtime_provider(
@@ -47,13 +49,47 @@ def build_runtime_provider(
 def _build_server(
     server_factory: ServerFactory,
     inference: ProviderInference,
+    transport_factory: TransportFactory | None = None,
 ) -> Any:
-    server = server_factory(inference=inference)
+    server = server_factory(inference=inference, transport_factory=transport_factory)
     if server is None:
         raise RuntimeError(
             "unable to create the LiveKit Agent server; install the locked dependencies"
         )
     return server
+
+
+def _guidance_session_id(room: Any) -> str:
+    """Use the Room name as the session boundary, with a safe local fallback."""
+
+    for candidate in (
+        getattr(room, "name", None),
+        getattr(getattr(room, "local_participant", None), "identity", None),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    return "agent-session"
+
+
+def build_transport_factory(
+    provider: VisionGuidanceProvider,
+) -> TransportFactory:
+    """Bind a Room's local participant to shot-aware provider inference."""
+
+    def factory(
+        room: Any,
+        current_shot: Callable[[], _live_agent.Shot],
+    ) -> GuidanceTransportAdapter:
+        publisher = getattr(room, "local_participant", None)
+        if publisher is None:
+            raise RuntimeError("LiveKit room has no local participant for guidance")
+        return GuidanceTransportAdapter(
+            create_provider_inference(provider, requested_shot=current_shot),
+            publisher,
+            session_id=_guidance_session_id(room),
+        )
+
+    return factory
 
 
 def check_agent(
@@ -66,7 +102,7 @@ def check_agent(
 
     provider = build_runtime_provider(settings, live_analyzer=live_analyzer)
     inference = create_provider_inference(provider)
-    _build_server(server_factory, inference)
+    _build_server(server_factory, inference, build_transport_factory(provider))
     LOGGER.info(
         "agent_check_ok provider_mode=%s provider=%s livekit_configured=%s",
         settings.provider_mode.value,
@@ -88,7 +124,7 @@ def run_agent_worker(
     settings.require_livekit()
     provider = build_runtime_provider(settings, live_analyzer=live_analyzer)
     inference = create_provider_inference(provider)
-    server = _build_server(server_factory, inference)
+    server = _build_server(server_factory, inference, build_transport_factory(provider))
     # Log only finite public diagnostics. Never interpolate settings or any
     # credential value into this line.
     LOGGER.info(
@@ -151,6 +187,7 @@ def main(
 __all__ = [
     *[name for name in _live_agent.__all__ if name != "main"],
     "build_runtime_provider",
+    "build_transport_factory",
     "check_agent",
     "main",
     "run_agent_worker",

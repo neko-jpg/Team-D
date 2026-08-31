@@ -29,6 +29,7 @@ LiveAnalyzer: TypeAlias = Callable[
     [GuidanceInput], LiveAnalyzerResult | Awaitable[LiveAnalyzerResult]
 ]
 ProviderInference: TypeAlias = Callable[[object], Awaitable[LiveAnalyzerResult]]
+RequestedShot: TypeAlias = GuidanceShot | str | Callable[[], GuidanceShot | str]
 
 
 class FixtureVisionGuidanceProvider:
@@ -127,14 +128,21 @@ def guidance_input_from_frame(
 def create_provider_inference(
     provider: VisionGuidanceProvider,
     *,
-    requested_shot: GuidanceShot | str = GuidanceShot.FRONT,
+    requested_shot: RequestedShot = GuidanceShot.FRONT,
 ) -> ProviderInference:
-    """Create the inference callback passed to ``create_agent_server``."""
+    """Create the inference callback passed to ``create_agent_server``.
+
+    ``requested_shot`` may be a zero-argument supplier for a long-lived Agent
+    session.  Resolving it for each frame keeps the provider input aligned
+    with the runtime's selected capture step without changing the legacy
+    ``inference(frame)`` callback shape.
+    """
 
     async def infer(frame: object) -> LiveAnalyzerResult:
+        shot = requested_shot() if callable(requested_shot) else requested_shot
         input_value = guidance_input_from_frame(
             frame,
-            requested_shot=requested_shot,
+            requested_shot=shot,
         )
         return await provider.analyze(input_value)
 
@@ -147,6 +155,7 @@ __all__ = [
     "LiveVisionGuidanceProvider",
     "ProviderInference",
     "ProviderUnavailableError",
+    "RequestedShot",
     "create_provider_inference",
     "create_vision_guidance_provider",
     "guidance_input_from_frame",

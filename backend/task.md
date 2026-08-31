@@ -57,15 +57,15 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 このフェーズでは、元タスクで完了済みのLiveKit camera track購読、capacity 1、同時推論1、`VisionGuidanceProvider`、`GuidanceStateMachine`を再実装しない。未完了の複合タスクから、Agent server、provider接続、transport、非永続化、障害復帰、バックエンドE2Eに関する部分だけを抽出する。
 
-- [ ] 5.1 【ともちゃん】Agentの`ProviderInference`結果を`GuidanceStateMachine`へ渡し、有限な`GuidanceEvent`へ変換してLiveKit data channelへ送るtransport adapterを`backend/**`へ実装する。短命助言はlossy、shot変更とsnapshot／再同期はreliable packetまたはRPCを使用し、providerの自由文で状態を決めない。（元タスク: 3.14、8.2）
+- [x] 5.1 【ともちゃん】Agentの`ProviderInference`結果を`GuidanceStateMachine`へ渡し、有限な`GuidanceEvent`へ変換してLiveKit data channelへ送るtransport adapterを`backend/**`へ実装する。短命助言はlossy、shot変更とsnapshot／再同期はreliable packetまたはRPCを使用し、providerの自由文で状態を決めない。（元タスク: 3.14、8.2）
 
-- [ ] 5.2 【ともちゃん】Room切断／Agent再接続後にserver snapshotを再送し、再同期後の新しいsequenceからだけ助言を再開する。終了済みsession、古いshot、再接続前の結果を送信しないことを`backend/tests/**`で確認する。（元タスク: 3.14）
+- [x] 5.2 【ともちゃん】Room切断／Agent再接続後にserver snapshotを再送し、再同期後の新しいsequenceからだけ助言を再開する。終了済みsession、古いshot、再接続前の結果を送信しないことを`backend/tests/**`で確認する。（元タスク: 3.14）
 
 - [ ] 5.3 【健太】HTTP API／providerが画像、判定、助言、測定状態をDBやファイルへ永続化せず、保存制御可能な外部AI requestでは保存を無効にする。Agent終了時にpending frame参照とin-flight処理を解放するlifecycleテストを`backend/tests/**`へ追加する。（元タスク: 3.15、8.5）
 
 - [ ] 5.4 【ともちゃん】live `MeasurementLineProvider`のtimeout、schema不正、provider errorをfixture成功や架空の4端点へ置き換えず、有限なAPI errorとして返すcontract／APIテストを`backend/tests/**`へ追加する。（元タスク: 5.8）
 
-- [ ] 5.5 【ともちゃん】backendからloopbackのrembgへ本番と同じ`file`、`model=birefnet-general-lite`、`om=true`を送るprewarm helperまたはlive integration testを`backend/**`へ追加し、responseが`image/png`かつ入力frontと同寸法のmask-only画像であることを確認する。（元タスク: 6.1）
+- [x] 5.5 【ともちゃん】backendからloopbackのrembgへ本番と同じ`file`、`model=birefnet-general-lite`、`om=true`を送るprewarm helperまたはlive integration testを`backend/**`へ追加し、responseが`image/png`かつ入力frontと同寸法のmask-only画像であることを確認する。（元タスク: 6.1）
 
 - [ ] 5.6 【健太】fixture transportで正常、provider timeout、古いevent、shot変更、切断／再接続、再同期を順に発生させ、sequence、expiry、現在shot、provider呼び出しが不正に巻き戻らないバックエンド回帰テストを1コマンドで実行できるようにする。（元タスク: 3.16）
 
