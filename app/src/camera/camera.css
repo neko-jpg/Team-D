@@ -1,11 +1,20 @@
 .camera-preview {
+  --camera-color-action: #ff4d5a;
+  --camera-color-error: #ffd8de;
+  --camera-color-guide: rgba(255, 255, 255, 0.88);
+  --camera-color-on-video: #fff;
+  --camera-color-surface: rgba(9, 13, 31, 0.52);
+  --camera-control-min-size: 44px;
   display: grid;
   gap: 12px;
   margin-top: 18px;
-  padding: 14px;
+  padding:
+    14px max(14px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(14px, env(safe-area-inset-left));
   border: 1px solid rgba(157, 173, 255, 0.25);
   border-radius: 18px;
-  background: rgba(9, 13, 31, 0.52);
+  background: var(--camera-color-surface);
 }
 
 .camera-preview-heading,
@@ -65,6 +74,77 @@
   object-fit: cover;
 }
 
+.camera-guide {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+}
+
+.camera-garment-guide {
+  position: absolute;
+  inset: 14% 11% 13%;
+  display: block;
+  border: 2px solid var(--camera-color-guide);
+  border-radius: 28% 28% 12% 12%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
+}
+
+.camera-garment-guide::before,
+.camera-garment-guide::after {
+  position: absolute;
+  top: 13%;
+  width: 24%;
+  height: 34%;
+  border-top: 2px solid var(--camera-color-guide);
+  content: "";
+}
+
+.camera-garment-guide::before {
+  right: 100%;
+  border-left: 2px solid var(--camera-color-guide);
+  border-radius: 28% 0 0 18%;
+  transform: skewY(-13deg);
+}
+
+.camera-garment-guide::after {
+  left: 100%;
+  border-right: 2px solid var(--camera-color-guide);
+  border-radius: 0 28% 18% 0;
+  transform: skewY(13deg);
+}
+
+.camera-guide--back .camera-garment-guide {
+  border-style: dashed;
+}
+
+.camera-tag-guide {
+  position: absolute;
+  inset: 22% 27%;
+  display: block;
+  border: 2px solid var(--camera-color-guide);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
+}
+
+.camera-guidance {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 12px;
+  color: var(--camera-color-on-video);
+  background: rgba(10, 12, 18, 0.72);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
 .camera-placeholder {
   display: grid;
   place-items: center;
@@ -82,6 +162,14 @@
   align-items: flex-start;
 }
 
+.camera-playing-controls {
+  display: flex;
+  min-width: 116px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .camera-preview-actions p {
   max-width: 230px;
   margin: 2px 0 0;
@@ -93,7 +181,8 @@
 
 .camera-primary-button,
 .camera-secondary-button {
-  min-height: 44px;
+  min-width: var(--camera-control-min-size);
+  min-height: var(--camera-control-min-size);
   flex: 0 0 auto;
   padding: 0 14px;
   border-radius: 12px;
@@ -116,12 +205,48 @@
   background: rgba(255, 255, 255, 0.09);
 }
 
+.camera-shutter {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  place-items: center;
+  padding: 0;
+  border: 3px solid var(--camera-color-on-video);
+  border-radius: 50%;
+  background: rgba(8, 10, 17, 0.42);
+}
+
+.camera-shutter span {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--camera-color-action);
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.camera-shutter:disabled {
+  cursor: wait;
+}
+
+.camera-shutter:disabled span {
+  opacity: 0.6;
+  transform: scale(0.86);
+}
+
+.camera-primary-button:focus-visible,
+.camera-secondary-button:focus-visible,
+.camera-shutter:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
 .camera-error {
   margin: 0;
   padding: 11px 12px;
   border: 1px solid rgba(255, 159, 172, 0.3);
   border-radius: 12px;
-  color: #ffd8de;
+  color: var(--camera-color-error);
   background: rgba(126, 34, 54, 0.2);
   font-size: 12px;
   line-height: 1.55;
@@ -136,5 +261,11 @@
   .camera-preview-actions p {
     max-width: none;
     text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .camera-shutter span {
+    transition: none;
   }
 }

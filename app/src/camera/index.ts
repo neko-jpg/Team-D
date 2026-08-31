@@ -3,6 +3,11 @@ export type {
   CameraControllerFactory,
   CameraPreviewProps,
 } from "./CameraPreview";
+export { captureVideoFrame } from "./captureFrame";
+export type {
+  CaptureFrameReader,
+  CaptureVideoFrameOptions,
+} from "./captureFrame";
 export {
   CameraController,
   CameraStartError,

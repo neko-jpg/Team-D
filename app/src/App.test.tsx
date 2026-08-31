@@ -1,8 +1,9 @@
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import type { CameraSession } from "./camera";
 import { FixtureShotAssessor } from "./providers/fixtureShotAssessor";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -32,6 +33,7 @@ afterEach(() => {
     roots.forEach((root) => root.unmount());
   });
   roots = [];
+  vi.restoreAllMocks();
 
   if (originalCreateObjectURL === undefined) {
     Reflect.deleteProperty(URL, "createObjectURL");
@@ -52,15 +54,51 @@ afterEach(() => {
   }
 });
 
-function renderApp(): HTMLElement {
+function renderApp(props: ComponentProps<typeof App> = {}): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(<App />);
+    root.render(<App {...props} />);
   });
   return container;
+}
+
+function createCameraSession(): CameraSession {
+  let running = false;
+
+  return {
+    currentStream: undefined,
+    currentVideoTrack: undefined,
+    get isRunning() {
+      return running;
+    },
+    start: vi.fn(async () => {
+      running = true;
+    }),
+    stop: vi.fn(() => {
+      running = false;
+    }),
+  };
+}
+
+async function clickButton(
+  container: HTMLElement,
+  label: string,
+): Promise<void> {
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes(label),
+  );
+  if (button === undefined) {
+    throw new Error(`button ${label} is not rendered`);
+  }
+
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 function selectValue(
@@ -190,5 +228,57 @@ describe("capture upload vertical slice", () => {
     expect(container.querySelector('[data-testid="capture-status"]')?.textContent).toContain("再試行");
     expect(container.querySelector('[data-testid="provider-error"]')?.textContent).toContain("fixture の ShotAssessor");
     expect(container.querySelector('[data-testid="edit-entry"]')).toBeNull();
+  });
+});
+
+describe("camera capture vertical slice", () => {
+  it("sends a raw manual capture to the assessor and advances the fixed guide", async () => {
+    const rawCameraBlob = new Blob(["distinctive-raw-camera-frame"], {
+      type: "image/jpeg",
+    });
+    const session = createCameraSession();
+    const captureFrame = vi.fn(async () => rawCameraBlob);
+    const assessSpy = vi.spyOn(FixtureShotAssessor.prototype, "assess");
+    const container = renderApp({
+      captureCameraFrame: captureFrame,
+      createCameraController: () => session,
+    });
+
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("front");
+    expect(container.querySelector('[data-testid="camera-guide"]')?.className).toContain(
+      "camera-guide--front",
+    );
+    expect(container.textContent).toContain("襟・袖・裾をガイド内に入れてください");
+    expect(container.textContent).not.toContain("READY");
+
+    await clickButton(container, "カメラを起動");
+    const shutter = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="正面を撮影"]',
+    );
+    expect(shutter?.disabled).toBe(false);
+
+    await act(async () => {
+      shutter?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captureFrame).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledWith(rawCameraBlob);
+    expect(assessSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blob: rawCameraBlob,
+        requestedShot: "front",
+      }),
+    );
+    expect(container.querySelector('[data-testid="current-step"]')?.textContent).toBe("back");
+    expect(container.querySelector('[data-testid="camera-guide"]')?.className).toContain(
+      "camera-guide--back",
+    );
+    expect(container.textContent).toContain("裏返して背面を上にしてください");
+    expect(container.querySelector<HTMLImageElement>('img[alt="正面写真"]')?.src).toContain(
+      "blob:test-1",
+    );
   });
 });
