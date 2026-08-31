@@ -4,6 +4,7 @@ dist-server/
 .env
 .env.*
 !.env.example
+.venv/
 .venv-rembg/
 .cache/rembg/
 tmp/
