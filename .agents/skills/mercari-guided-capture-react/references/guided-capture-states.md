@@ -41,7 +41,7 @@ export type ConnectionState =
   | { status: "connecting"; attempt: number }
   | { status: "connected"; lastEventAt: number }
   | { status: "reconnecting"; attempt: number; nextRetryAt?: number }
-  | { status: "offline"; reason: "timeout" | "network" | "agent_unavailable" };
+  | { status: "disconnected"; reason: "timeout" | "network" | "agent_unavailable" };
 
 export type AgentGuidanceCode =
   | "MOVE_CLOSER"
@@ -89,6 +89,7 @@ export interface CaptureSlot {
   step: CaptureStep;
   status: "empty" | "validating" | "accepted" | "retake";
   imageUrl?: string;
+  acceptance?: "validated" | "manual_measurement_photo";
   retakeReasons?: string[];
 }
 
@@ -190,7 +191,7 @@ export const guidanceTiming = {
 - 対象は平置きしたトップス。着丈と身幅だけを扱う。
 - 衣類を背面が上になるように置き、襟、袖、裾、しわ、折れを整える。
 - 現行仕様の 50mm 正方形マーカーを 100% 倍率で印刷し、実物の一辺が 50mm であることを確認する。
-- マーカーを衣類と同一平面の右下へ、衣類から離し、重ねずに置く。A4 用紙など別基準へ黙って切り替えない。基準方式を変える場合は先にプロダクト仕様を更新する。
+- マーカーを衣類と同一平面の右下へ、衣類から離し、重ねずに置く。別の基準物へ黙って切り替えない。基準方式を変える場合は先にプロダクト仕様を更新する。
 
 **撮影**
 
@@ -220,8 +221,9 @@ export type MeasurementState =
       garmentFullyVisible: boolean;
       manualInputEligible: boolean;
     }
+  | { status: "manual_editing"; imageUrl: string; lengthCm?: number; widthCm?: number }
   | { status: "approved_cv"; draft: MeasurementDraft }
-  | { status: "approved_manual"; lengthCm: number; widthCm: number };
+  | { status: "approved_manual"; imageUrl: string; lengthCm: number; widthCm: number };
 
 export type ReferenceSpec =
   { kind: "square_marker"; edgeMm: 50 };
@@ -295,9 +297,9 @@ export type MeasurementWarning = "LENGTH_OUT_OF_RANGE" | "WIDTH_OUT_OF_RANGE";
 | `connecting` | 撮影サポートに接続しています… | 固定ガイド、手動撮影 |
 | `connected` | 通常は表示しない | 全機能 |
 | `reconnecting` | 再接続しています。撮影は続けられます | 固定ガイド、端末内判定、手動撮影 |
-| `offline` | 撮影サポートに接続できません。撮影は続けられます | 固定ガイド、端末内判定、手動撮影、「再試行」 |
+| `disconnected` | 撮影サポートに接続できません。撮影は続けられます | 固定ガイド、端末内判定、手動撮影、「再試行」 |
 
-- 自動再接続は回数と待ち時間を有限にし、上限後は `offline` と明示的な「再試行」に移る。
+- 自動再接続は回数と待ち時間を有限にし、上限後は `disconnected` と明示的な「再試行」に移る。
 - 再接続後は server snapshot で現在 step を照合してから Agent 助言を復帰する。古い packet を再生しない。
 - 撮影後 AI が失敗した場合、現在 step と撮影済み画像を保持して「もう一度確認する」「撮り直す」を提示する。
 - 採寸 CV が失敗した場合、画像を保持して「撮り直す」「手入力」を提示する。
@@ -333,10 +335,18 @@ export type CaptureEvent =
   | { type: "RECONNECT_REQUESTED"; at: number }
   | { type: "MEASUREMENT_ANALYSIS_STARTED"; imageUrl: string }
   | { type: "MEASUREMENT_DRAFT_READY"; draft: MeasurementDraft }
-  | { type: "MEASUREMENT_ANALYSIS_FAILED"; reason: MeasurementFailure }
+  | {
+      type: "MEASUREMENT_ANALYSIS_FAILED";
+      reason: MeasurementFailure;
+      imageUrl: string;
+      garmentFullyVisible: boolean;
+      manualInputEligible: boolean;
+    }
   | { type: "MEASUREMENT_POINT_MOVED"; line: "length" | "width"; end: "start" | "end"; point: Point }
-  | { type: "MEASUREMENT_APPROVED" }
-  | { type: "MEASUREMENT_MANUAL_VALUES_SET"; lengthCm: number; widthCm: number };
+  | { type: "MEASUREMENT_CV_APPROVED" }
+  | { type: "MEASUREMENT_MANUAL_STARTED"; imageUrl: string }
+  | { type: "MEASUREMENT_MANUAL_VALUES_SET"; lengthCm: number; widthCm: number }
+  | { type: "MEASUREMENT_MANUAL_APPROVED" };
 ```
 
 Reducer の重要な振る舞い:
@@ -344,7 +354,9 @@ Reducer の重要な振る舞い:
 - `SHUTTER_PRESSED` は `ready` 以外でも受理し、`capturing` へ遷移する。`capturing` 中に同じ操作が来た場合だけ多重処理を防ぐ。
 - `AGENT_GUIDANCE_RECEIVED` は session / step / sequence / expiry を検証した後だけ stabilizer へ渡す。Agent の `READY` 単独で写真を受理しない。
 - `POST_CAPTURE_RETAKE_REQUIRED` は対象 slot だけを `retake` にし、他の `accepted` slot を変更しない。
-- `POST_CAPTURE_ACCEPTED` 後だけ対象の写真 slot を `accepted` にする。measurement 写真の受理後は採寸解析へ進み、`MEASUREMENT_APPROVED` は採寸結果だけを承認済みにする。背景編集は 4 slot と採寸承認の両方が揃った場合だけ解放する。次 step はこの構造化状態から決定し、AI の自由文で決めない。
+- `POST_CAPTURE_ACCEPTED` 後だけ対象の写真 slot を通常受理する。measurement写真のマーカー解析が失敗しても、衣類全体が写り`manualInputEligible`がtrueなら、同じ画像を`acceptance: "manual_measurement_photo"`として4枚目に保持できる。衣類が欠ける場合は受理せず撮り直す。
+- measurement写真の受理後は採寸解析または手入力へ進む。`MEASUREMENT_MANUAL_VALUES_SET`は`manual_editing`の値を更新するだけで承認しない。`MEASUREMENT_CV_APPROVED`または`MEASUREMENT_MANUAL_APPROVED`の明示イベントだけが採寸結果を承認済みにする。
+- 背景編集は4 slotと`approved_cv|approved_manual`の両方が揃った場合だけ解放する。次stepはこの構造化状態から決定し、AIの自由文で決めない。
 - `CONNECTION_CHANGED` で `phase`、slot、measurement を初期化しない。
 - 非同期結果は `captureRequestId` と step を照合し、撮り直し後に届いた古い結果を無視する。
 
@@ -375,18 +387,24 @@ export const captureFixtures = {
   measurementEditing: { step: "measurement", measurementStatus: "editing" },
   measurementMarkerOccluded: { step: "measurement", measurementStatus: "invalid", reason: "MARKER_OCCLUDED" },
   measurementInvalidEndpoint: { step: "measurement", measurementStatus: "invalid", reason: "ENDPOINTS_INVALID" },
-  measurementManualFallback: { step: "measurement", measurementStatus: "invalid", actions: ["retake", "manual"] },
+  measurementManualFallback: {
+    step: "measurement",
+    measurementStatus: "invalid",
+    garmentFullyVisible: true,
+    manualInputEligible: true,
+    actions: ["retake", "manual"],
+  },
   reconnectingWhileCoaching: {
     step: "front",
     phase: "coaching",
     guidanceCode: "CAMERA_OVERHEAD",
     connection: "reconnecting",
   },
-  offlineLocalReady: {
+  disconnectedLocalReady: {
     step: "front",
     phase: "ready",
     guidanceCode: "READY",
-    connection: "offline",
+    connection: "disconnected",
     guidanceSource: "local",
   },
 } as const;

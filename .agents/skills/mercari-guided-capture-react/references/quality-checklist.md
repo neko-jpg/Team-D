@@ -11,7 +11,7 @@ Use this checklist for design reviews, Storybook reviews, and implementation han
 - Correcting a problem produces a brief affirmative response.
 - Manual capture remains available outside `READY`.
 - Accepted shots and measurement edits survive retry, reconnect, and provider failure.
-- Busy, timeout, error, retry, offline/fallback, and success states are represented by fixtures.
+- Busy, timeout, error, retry, disconnected/fallback, and success states are represented by fixtures.
 
 ## Camera composition
 
