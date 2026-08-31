@@ -1,5 +1,16 @@
 """External provider contracts used by the backend and Agent."""
 
+from .background_generator import (
+    ALLOWED_BACKGROUND_STYLE_PROMPTS,
+    BACKGROUND_GENERATION_TIMEOUT_SECONDS,
+    BackgroundGenerationContractError,
+    BackgroundGenerationProviderError,
+    BackgroundGenerationTimeoutError,
+    BackgroundGenerator,
+    FixtureBackgroundGenerator,
+    GeneratedBackground,
+    ImagesClient,
+)
 from .garment_masker import (
     GarmentMask,
     GarmentMaskContractError,
@@ -58,10 +69,17 @@ from .shot_assessor_factory import FixtureShotAssessor, create_shot_assessor
 
 
 __all__ = [
+    "ALLOWED_BACKGROUND_STYLE_PROMPTS",
     "AssessmentImage",
+    "BACKGROUND_GENERATION_TIMEOUT_SECONDS",
+    "BackgroundGenerationContractError",
+    "BackgroundGenerationProviderError",
+    "BackgroundGenerationTimeoutError",
+    "BackgroundGenerator",
     "EncodedImage",
-    "FixtureShotAssessor",
+    "FixtureBackgroundGenerator",
     "FixtureMeasurementLineProvider",
+    "FixtureShotAssessor",
     "FixtureVisionGuidanceProvider",
     "GarmentMask",
     "GarmentMaskContractError",
@@ -74,6 +92,8 @@ __all__ = [
     "GuidanceContractError",
     "GuidanceInput",
     "GuidanceShot",
+    "GeneratedBackground",
+    "ImagesClient",
     "LiveAnalyzer",
     "LiveMeasurementLineProviderUnavailable",
     "LiveVisionGuidanceProvider",
