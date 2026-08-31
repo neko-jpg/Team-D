@@ -326,6 +326,7 @@ def test_analyze_shot_passes_only_each_normalized_copy_to_the_assessor(
     )
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
     assert len(normalizer.results) == 1
     assert len(assessor.requests) == 1
     normalized = normalizer.results[0]

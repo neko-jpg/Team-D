@@ -155,6 +155,7 @@ def test_valid_four_endpoints_and_exact_image_are_returned_and_forwarded(
     response = client.post("/api/suggest-measurement-points", files=multipart(image))
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
     assert response.json() == endpoints
     assert len(provider.requests) == 1
     request = provider.requests[0]

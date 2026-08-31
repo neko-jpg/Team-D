@@ -13,7 +13,7 @@ import warnings
 from io import BytesIO
 from typing import Annotated, Final
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 
 from .providers.measurement_line import (
     MeasurementImage,
@@ -178,6 +178,7 @@ suggest_measurement_points_router = APIRouter()
 
 @suggest_measurement_points_router.post("/api/suggest-measurement-points")
 async def suggest_measurement_points(
+    response: Response,
     file: Annotated[UploadFile, File()],
     provider: Annotated[MeasurementLineProvider, Depends(get_measurement_line_provider)],
     timeout_seconds: Annotated[float, Depends(get_measurement_timeout_seconds)],
@@ -193,7 +194,7 @@ async def suggest_measurement_points(
             provider.suggest(provider_input),
             timeout=timeout_seconds,
         )
-        return validate_measurement_endpoints(raw_endpoints).to_payload()
+        payload = validate_measurement_endpoints(raw_endpoints).to_payload()
     except TimeoutError:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -221,6 +222,9 @@ async def suggest_measurement_points(
                 retryable=True,
             ),
         ) from None
+
+    response.headers["Cache-Control"] = "no-store"
+    return payload
 
 
 __all__ = [

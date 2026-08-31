@@ -333,6 +333,12 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
                     result = self._inference(frame)
                     if inspect.isawaitable(result):
                         result = await result
+                    # An inference implementation may catch cancellation and
+                    # still return a value.  Once shutdown has fenced the
+                    # processor, do not retain that late payload or expose it
+                    # to an application callback.
+                    if self._closed:
+                        return
                     self._last_result = result
                     self._last_frame = frame
                     self._processed_count += 1
@@ -343,6 +349,12 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
+                    # As with successful results, an inference implementation
+                    # may translate cancellation into a regular exception.
+                    # Shutdown owns that outcome, so it must not become a late
+                    # diagnostic value or error callback.
+                    if self._closed:
+                        return
                     self._last_error = error
                     self._error_count += 1
                     if self._on_error is not None:
@@ -367,9 +379,12 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError:
-                # The processor's worker may itself have been cancelled by
-                # ``stop``; there is no remaining work to await in that case.
-                return
+                # A cancelled worker is idle, but cancellation of this caller
+                # must propagate so shutdown cannot report completion while a
+                # cancellation-suppressing inference is still running.
+                if task.cancelled():
+                    return
+                raise
 
     async def flush(self) -> None:
         await self.wait_idle()
@@ -379,6 +394,12 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
 
         self._closed = True
         self.slot.close()
+        # These fields are diagnostics only.  Keeping them after the session
+        # ends would unnecessarily retain frame/result payloads (and an
+        # exception traceback can retain additional coroutine locals).
+        self._last_frame = None
+        self._last_result = None
+        self._last_error = None
         task = self._worker_task
         if cancel and task is not None and not task.done():
             task.cancel()
@@ -388,6 +409,11 @@ class LatestFrameProcessor(Generic[FrameT, ResultT]):
     async def aclose(self, *, cancel: bool = True) -> None:
         self.stop(cancel=cancel)
         await self.wait_idle()
+        # Repeat the release after awaiting as a defensive idempotent fence
+        # for inference implementations that suppress cancellation.
+        self._last_frame = None
+        self._last_result = None
+        self._last_error = None
 
 
 def _enum_strings(value: Any) -> set[str]:
@@ -765,6 +791,12 @@ class AgentRuntime:
     current_shot: Shot = "front"
     guidance_transport: GuidanceTransportAdapter | None = None
     _lifecycle_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
+    _close_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _closed: bool = field(default=False, init=False, repr=False)
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
 
     async def set_shot(self, shot: object) -> Any:
         """Set the capture step used by both provider input and emitted events."""
@@ -805,15 +837,45 @@ class AgentRuntime:
     async def close(self) -> None:
         """Fence guidance publication, then stop camera processing."""
 
-        if self.guidance_transport is not None:
-            await self.guidance_transport.close()
-        tasks = tuple(self._lifecycle_tasks)
-        for task in tasks:
-            if task is not asyncio.current_task() and not task.done():
-                task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        await self.subscriber.stop()
+        async with self._close_lock:
+            if self._closed:
+                return
+
+            first_error: Exception | None = None
+            try:
+                if self.guidance_transport is not None:
+                    await self.guidance_transport.close()
+            except Exception as error:
+                # Camera payload cleanup must still run if publication fencing
+                # fails.  Re-raise the first failure after local teardown.
+                first_error = error
+
+            current_task = asyncio.current_task()
+            tasks = tuple(
+                task for task in self._lifecycle_tasks if task is not current_task
+            )
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self._lifecycle_tasks.clear()
+
+            try:
+                # Subscriber.stop() awaits processor.aclose(), which cancels
+                # and joins an in-flight inference before returning.
+                await self.subscriber.stop()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+
+            if first_error is not None:
+                raise first_error
+            # Mark completion only after every local resource is drained.  If
+            # this coroutine is cancelled, a later close can safely retry.
+            self._closed = True
+
+    aclose = close
 
 
 def _attach_guidance_lifecycle(room: Any, runtime: AgentRuntime) -> None:

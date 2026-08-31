@@ -61,7 +61,7 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 5.2 【ともちゃん】Room切断／Agent再接続後にserver snapshotを再送し、再同期後の新しいsequenceからだけ助言を再開する。終了済みsession、古いshot、再接続前の結果を送信しないことを`backend/tests/**`で確認する。（元タスク: 3.14）
 
-- [ ] 5.3 【健太】HTTP API／providerが画像、判定、助言、測定状態をDBやファイルへ永続化せず、保存制御可能な外部AI requestでは保存を無効にする。Agent終了時にpending frame参照とin-flight処理を解放するlifecycleテストを`backend/tests/**`へ追加する。（元タスク: 3.15、8.5）
+- [x] 5.3 【健太】HTTP API／providerが画像、判定、助言、測定状態をDBやファイルへ永続化せず、保存制御可能な外部AI requestでは保存を無効にする。Agent終了時にpending frame参照とin-flight処理を解放するlifecycleテストを`backend/tests/**`へ追加する。（元タスク: 3.15、8.5）
 
 - [ ] 5.4 【ともちゃん】live `MeasurementLineProvider`のtimeout、schema不正、provider errorをfixture成功や架空の4端点へ置き換えず、有限なAPI errorとして返すcontract／APIテストを`backend/tests/**`へ追加する。（元タスク: 5.8）
 

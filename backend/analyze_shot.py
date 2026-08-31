@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Final
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 
 from .image_normalization import (
     ImageNormalizationError,
@@ -110,6 +110,7 @@ analyze_shot_router = APIRouter()
 
 @analyze_shot_router.post("/api/analyze-shot")
 async def analyze_shot(
+    response: Response,
     requested_shot: Annotated[RequestedShot, Form(alias="requestedShot")],
     file: Annotated[UploadFile, File()],
     assessor: Annotated[ShotAssessor, Depends(get_shot_assessor)],
@@ -195,12 +196,15 @@ async def analyze_shot(
         ) from None
 
     try:
-        return validate_shot_assessment(raw_assessment).to_payload()
+        payload = validate_shot_assessment(raw_assessment).to_payload()
     except ShotAssessmentContractError:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=_provider_error("INVALID_RESPONSE", "Shot assessor returned an invalid response", retryable=True),
         ) from None
+
+    response.headers["Cache-Control"] = "no-store"
+    return payload
 
 
 __all__ = [
