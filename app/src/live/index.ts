@@ -34,3 +34,29 @@ export type {
   StabilityResult,
   StabilityTrackerOptions,
 } from "./stability-tracker";
+export {
+  toPixelRoi,
+} from "./pixelRoi";
+export type {
+  NormalizedGuideRect,
+  PixelRoi,
+  VideoRoiInput,
+} from "./pixelRoi";
+export {
+  DEFAULT_BLUR_VARIANCE_MIN,
+  DEFAULT_BRIGHTNESS_MAX,
+  DEFAULT_BRIGHTNESS_MIN,
+  assessGrayscaleImageQuality,
+  assessRgbaImageQuality,
+  blurCheck,
+  brightnessCheck,
+  laplacianVariance,
+  rgbaToGrayscale,
+} from "./imageQuality";
+export type {
+  BlurCheckResult,
+  BrightnessCheckResult,
+  ImageQualityIssue,
+  ImageQualityResult,
+  ImageQualityThresholds,
+} from "./imageQuality";
