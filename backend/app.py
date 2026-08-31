@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
+
 from fastapi import FastAPI, Response
 
 from .analyze_shot import analyze_shot_router, get_shot_assessor
@@ -10,20 +14,58 @@ from .providers.garment_masker import GarmentMasker, HttpxGarmentMaskHttpClient
 from .providers.measurement_line_factory import create_measurement_line_provider
 from .providers.shot_assessor_factory import create_shot_assessor
 from .remove_background import get_garment_masker, remove_background_router
-from .settings import BackendSettings
+from .settings import BackendSettings, ProviderMode
 from .suggest_measurement_points import (
     get_measurement_line_provider,
     suggest_measurement_points_router,
 )
 
 
+def _create_live_openai_client(settings: BackendSettings) -> Any | None:
+    """Create one app-owned client shared by live Responses providers."""
+
+    if settings.provider_mode is not ProviderMode.LIVE:
+        return None
+    if not os.environ.get("OPENAI_API_KEY", "").strip():
+        return None
+    try:
+        from openai import AsyncOpenAI
+
+        return AsyncOpenAI()
+    except Exception:
+        return None
+
+
 def create_app(settings: BackendSettings | None = None) -> FastAPI:
     """Build the API while preserving the legacy health contract."""
 
     resolved_settings = settings or BackendSettings.from_env()
-    garment_masker = GarmentMasker(HttpxGarmentMaskHttpClient())
-    measurement_line_provider = create_measurement_line_provider(resolved_settings)
-    app = FastAPI(title="Team-D listing photo assistant")
+    openai_client = _create_live_openai_client(resolved_settings)
+    responses_client = (
+        None if openai_client is None else openai_client.responses
+    )
+    garment_masker = GarmentMasker(
+        HttpxGarmentMaskHttpClient(),
+        remove_url=resolved_settings.rembg_remove_url,
+    )
+    measurement_line_provider = create_measurement_line_provider(
+        resolved_settings,
+        live_client=responses_client,
+    )
+    shot_assessor = create_shot_assessor(
+        resolved_settings,
+        live_client=responses_client,
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            if openai_client is not None:
+                await openai_client.close()
+
+    app = FastAPI(title="Team-D listing photo assistant", lifespan=lifespan)
     app.state.settings = resolved_settings
     # Resolve the token issuer from the same immutable settings object used by
     # this process. This prevents request-time environment rereads from
@@ -50,9 +92,7 @@ def create_app(settings: BackendSettings | None = None) -> FastAPI:
     # The endpoint remains provider-agnostic.  This application-level wiring
     # uses the same immutable settings instance as the token endpoint and
     # preserves provider exceptions instead of falling back implicitly.
-    app.dependency_overrides[get_shot_assessor] = lambda: create_shot_assessor(
-        resolved_settings
-    )
+    app.dependency_overrides[get_shot_assessor] = lambda: shot_assessor
     app.dependency_overrides[get_measurement_line_provider] = (
         lambda: measurement_line_provider
     )

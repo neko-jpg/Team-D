@@ -73,7 +73,7 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 - [x] 5.8 【ともちゃん】fixtureモードでAgent guidance経路と`analyze-shot`、`suggest-measurement-points`、`remove-background`、背景生成providerを順に通すバックエンドE2Eを2回連続で実行し、同じevent、response、error契約を得る。（元タスク: 8.1）
 
-- [ ] 5.9 【ともちゃん】live smokeとしてAgentのcamera track subscribe、有限codeの変化、撮影後判定、4端点提案、front mask、背景生成providerを順に確認する。ブラウザUI、iPhone操作、Runbook記録はこのタスクへ含めない。（元タスク: 8.2）
+- [x] 5.9 【ともちゃん】live smokeとしてAgentのcamera track subscribe、有限codeの変化、撮影後判定、4端点提案、front mask、背景生成providerを順に確認する。ブラウザUI、iPhone操作、Runbook記録はこのタスクへ含めない。（元タスク: 8.2）
 
 - [x] 5.10 【ともちゃん】Agent停止、撮影後AI timeout、端点提案失敗、rembg timeout／無効mask、背景生成失敗をfixtureで発生させ、成功responseへ自動変換せず、有限なerrorと再試行可能性を返すバックエンド障害マトリクステストを追加する。（元タスク: 8.3）
 
@@ -81,7 +81,7 @@ furima-sandboxへの統合作業は考慮しない。React、Vite、UI、ブラ�
 
 ## 完了条件
 
-- [ ] 【ともちゃん】フェーズ1〜5のprovider、FastAPI、Agent transport、外部送信境界が`backend/**`だけで実装され、live失敗がfixture成功へ自動変換されないことを確認する。
+- [x] 【ともちゃん】フェーズ1〜5のprovider、FastAPI、Agent transport、外部送信境界が`backend/**`だけで実装され、live失敗がfixture成功へ自動変換されないことを確認する。
 - [x] 【健太】`.venv/bin/python -m pytest -q backend/tests`を実行し、フェーズ1〜5で抽出したバックエンド部分の正常系・異常系がすべて成功することを確認する。
 
 ## 抽出対象外とした未完了タスク

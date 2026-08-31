@@ -34,15 +34,17 @@ class ProviderMode(str, Enum):
             raise SettingsError("PROVIDER_MODE must be fixture or live") from error
 
 
-def _port(value: object) -> int:
+def _port(value: object, *, field_name: str = "API_PORT") -> int:
     if isinstance(value, bool):
-        raise SettingsError("API_PORT must be an integer between 1 and 65535")
+        raise SettingsError(f"{field_name} must be an integer between 1 and 65535")
     try:
         converted = int(value)
     except (TypeError, ValueError) as error:
-        raise SettingsError("API_PORT must be an integer between 1 and 65535") from error
+        raise SettingsError(
+            f"{field_name} must be an integer between 1 and 65535"
+        ) from error
     if not 1 <= converted <= 65_535:
-        raise SettingsError("API_PORT must be an integer between 1 and 65535")
+        raise SettingsError(f"{field_name} must be an integer between 1 and 65535")
     return converted
 
 
@@ -71,6 +73,7 @@ class BackendSettings:
     provider_mode: ProviderMode = ProviderMode.FIXTURE
     api_host: str = "127.0.0.1"
     api_port: int = 3001
+    rembg_port: int = 7000
     livekit_url: str = field(default="", repr=False)
     livekit_api_key: str = field(default="", repr=False)
     livekit_api_secret: str = field(default="", repr=False)
@@ -82,6 +85,11 @@ class BackendSettings:
         if not isinstance(self.api_host, str) or not self.api_host.strip():
             raise SettingsError("API_HOST must be a non-empty string")
         object.__setattr__(self, "api_port", _port(self.api_port))
+        object.__setattr__(
+            self,
+            "rembg_port",
+            _port(self.rembg_port, field_name="REMBG_PORT"),
+        )
         for name in ("livekit_url", "livekit_api_key", "livekit_api_secret"):
             if not isinstance(getattr(self, name), str):
                 raise SettingsError(f"{name.upper()} must be a string")
@@ -127,6 +135,7 @@ class BackendSettings:
             provider_mode=ProviderMode.parse(selected_mode),
             api_host=api_host if api_host is not None else source.get("API_HOST", "127.0.0.1"),
             api_port=api_port if api_port is not None else source.get("API_PORT", "3001"),
+            rembg_port=source.get("REMBG_PORT", "7000"),
             livekit_url=source.get("LIVEKIT_URL", ""),
             livekit_api_key=source.get("LIVEKIT_API_KEY", ""),
             livekit_api_secret=source.get("LIVEKIT_API_SECRET", ""),
@@ -150,6 +159,12 @@ class BackendSettings:
         return all(
             (self.livekit_url, self.livekit_api_key, self.livekit_api_secret)
         )
+
+    @property
+    def rembg_remove_url(self) -> str:
+        """Keep the rembg boundary on loopback while allowing port conflicts."""
+
+        return f"http://127.0.0.1:{self.rembg_port}/api/remove"
 
     def require_livekit(self) -> None:
         """Fail explicitly when an Agent worker cannot join LiveKit."""

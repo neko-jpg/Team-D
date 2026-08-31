@@ -242,6 +242,19 @@ def test_valid_mask_png_is_returned_and_front_original_is_forwarded_exactly(
     ]
 
 
+def test_masker_can_use_an_alternate_loopback_port() -> None:
+    front = png_image()
+    http_client = RequestSpyClient(FakeResponse(mask_png(add_foreground=True)))
+    masker = GarmentMasker(
+        http_client,
+        remove_url="http://127.0.0.1:7001/api/remove",
+    )
+
+    asyncio.run(masker.mask(GarmentMaskInput(front, "image/png")))
+
+    assert http_client.calls[0]["url"] == "http://127.0.0.1:7001/api/remove"
+
+
 def test_timeout_returns_finite_error_without_mask_body(client: TestClient) -> None:
     masker = NeverCompletingMasker()
     install_masker(client, masker, timeout=0.001)

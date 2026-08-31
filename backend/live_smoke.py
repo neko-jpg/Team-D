@@ -43,6 +43,7 @@ from .providers.vision_guidance import (
     VisionDecision,
     validate_vision_decision,
 )
+from .providers.vision_guidance_responses import ResponsesVisionGuidanceAnalyzer
 from .settings import BackendSettings, ProviderMode
 
 
@@ -163,8 +164,24 @@ async def _run_livekit_guidance_smoke(
     except ImportError as error:
         raise LiveSmokeError("LiveKit RTC is unavailable") from error
 
-    provider = create_vision_guidance_provider(settings)
+    if not os.environ.get("OPENAI_API_KEY", "").strip():
+        raise LiveSmokeError("OpenAI is not configured for live guidance")
+    try:
+        from openai import AsyncOpenAI
+
+        openai_client = AsyncOpenAI()
+        model = os.environ.get("VISION_GUIDANCE_MODEL", "").strip()
+        provider = create_vision_guidance_provider(
+            settings,
+            live_analyzer=ResponsesVisionGuidanceAnalyzer(
+                openai_client.responses,
+                model or "gpt-5.6-luna",
+            ),
+        )
+    except Exception as error:
+        raise LiveSmokeError("Live vision guidance provider is unavailable") from error
     if not isinstance(provider, LiveVisionGuidanceProvider) or not provider.available:
+        await openai_client.close()
         raise LiveSmokeError("Live vision guidance provider is unavailable")
 
     room_name = f"listing-photo-backend-smoke-{uuid.uuid4().hex[:16]}"
@@ -274,6 +291,7 @@ async def _run_livekit_guidance_smoke(
             await publisher_room.disconnect()
         if agent_room.isconnected():
             await agent_room.disconnect()
+        await openai_client.close()
 
 
 def _api_failure_code(response: Any) -> str:
